@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import sys
 import time
 from pathlib import Path
@@ -34,7 +35,25 @@ class APIRunnerVerifier:
         self.graph = graph
         self._app_instance = None
         self._test_client = None
+        self._identity_fixtures = self._load_identity_fixtures()
         self._init_real_app()
+
+    def _load_identity_fixtures(self) -> dict[str, dict[str, Any]]:
+        """Load only explicit BOLA fixtures; absent/malformed input means no test."""
+        path = self.root / ".project-graph" / "identity-fixtures.json"
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            endpoints = payload.get("endpoints", {})
+            return endpoints if isinstance(endpoints, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    @staticmethod
+    def _redact_headers(headers: dict[str, Any]) -> dict[str, str]:
+        secret_headers = {"authorization", "cookie", "x-api-key"}
+        return {str(k): "[REDACTED]" if str(k).lower() in secret_headers else str(v) for k, v in headers.items()}
 
     def _init_real_app(self) -> None:
         """Attempt to load real FastAPI/ASGI backend into an in-process TestClient."""
@@ -127,91 +146,114 @@ class APIRunnerVerifier:
                     bola_static_check.evidence_ids.append(ev.id)
                 else:
                     bola_static_check.status = CheckStatus.PASSED
+        elif bola_static_check:
+            bola_static_check.status = CheckStatus.NOT_APPLICABLE
 
-        # 3. Real Dynamic Execution Tier (Zero mocks)
+        # 3. Real Dynamic Execution Tier.  Never invent parameters, bodies or
+        # identities: unknown contracts remain explicitly unverified.
         if self._test_client is not None:
-            test_path = route_path.replace("{id}", "res_123")
-            try:
-                # Real HTTP Request
-                t0 = time.time()
-                resp = self._test_client.request(method, test_path, json={"prompt": "test"} if method == "POST" else None)
-                duration = round(time.time() - t0, 3)
-
-                resp_body = resp.text[:300]
-                if http_exec_check:
-                    http_exec_check.status = CheckStatus.PASSED if resp.status_code < 500 else CheckStatus.FAILED
-                    http_exec_check.details = {"status_code": resp.status_code, "duration_seconds": duration}
-
-                ev = self.evidence_store.add(
-                    evidence_type=EvidenceType.API_RESPONSE,
-                    target_id=node.id,
-                    summary=f"Physical HTTP {method} {test_path} returned status {resp.status_code} in {duration}s.",
-                    source_location=file_rel,
-                    payload={"route": test_path, "status_code": resp.status_code, "body": resp_body, "duration_seconds": duration},
-                    artifact_bytes=resp.content,
-                    mime_type="application/json",
-                )
-                evidence_ids.append(ev.id)
-                if http_exec_check:
-                    http_exec_check.evidence_ids.append(ev.id)
-
-                # Real Multi-Identity BOLA Testing
-                if is_parameterized and bola_runtime_check:
-                    # Identity A = Owner (simulated token), Identity B = Cross-Tenant Attacker (unauthenticated or cross-token)
-                    attacker_headers = {"Authorization": "Bearer attacker_token_user_b"}
-                    resp_bola = self._test_client.get(test_path, headers=attacker_headers)
-
-                    if resp_bola.status_code == 200:
-                        # Real BOLA proven: returns 200 to unauthorized caller
-                        bola_runtime_check.status = CheckStatus.FAILED
-                        ev_bola = self.evidence_store.add(
-                            evidence_type=EvidenceType.AUTH_BOUNDARY_TEST,
-                            target_id=node.id,
-                            summary=f"Confirmed Physical BOLA / IDOR: '{method} {test_path}' allowed unauthorized access (HTTP 200 OK).",
-                            source_location=file_rel,
-                            payload={
-                                "test_type": "BOLA_MULTI_TENANT_ACCESS",
-                                "simulated_actor": "User_B (Attacker)",
-                                "target_resource": "res_123 (User_A)",
-                                "status_code": resp_bola.status_code,
-                                "observation": "Resource returned with 200 OK without 401 Unauthorized or 403 Forbidden.",
-                            },
-                            artifact_bytes=resp_bola.content,
-                        )
-                        evidence_ids.append(ev_bola.id)
-                        bola_runtime_check.evidence_ids.append(ev_bola.id)
-
-                        self.evidence_store.add_claim(
-                            statement=f"Endpoint '{method} {route_path}' permits unauthenticated cross-tenant access to private objects.",
-                            target_id=node.id,
-                            evidence_ids=[ev_bola.id],
-                            evidence_strength="RUNTIME_OBSERVED",
-                            status="CONFIRMED",
-                        )
-                    else:
-                        bola_runtime_check.status = CheckStatus.PASSED
-
-            except Exception as ex:
-                if http_exec_check:
-                    http_exec_check.status = CheckStatus.ERROR
-                    http_exec_check.unverified_reason = f"HTTP dispatch error: {ex}"
-                if bola_runtime_check:
-                    bola_runtime_check.status = CheckStatus.ERROR
-                    bola_runtime_check.unverified_reason = f"BOLA dispatch error: {ex}"
+            self._execute_safe_probe(node, method, route_path, file_rel, http_exec_check, evidence_ids)
+            self._execute_bola_contract(node, method, route_path, file_rel, bola_runtime_check, evidence_ids)
         else:
             # Honest unverified status
             if http_exec_check:
                 http_exec_check.status = CheckStatus.UNVERIFIED
                 http_exec_check.unverified_reason = "TestClient runtime unavailable or app could not be booted."
             if bola_runtime_check:
-                bola_runtime_check.status = CheckStatus.UNVERIFIED
-                bola_runtime_check.unverified_reason = "TestClient runtime unavailable; cannot execute live multi-identity test."
+                contract = self._identity_fixtures.get(f"{method} {route_path}")
+                required = {"owner_headers", "attacker_headers", "owner_resource_path", "provisioning_evidence"}
+                if is_parameterized and (not isinstance(contract, dict) or not required.issubset(contract)):
+                    bola_runtime_check.status = CheckStatus.BLOCKED
+                    bola_runtime_check.unverified_reason = "Requires provisioned owner/attacker fixture contract in .project-graph/identity-fixtures.json; no synthetic identities were used."
+                elif is_parameterized:
+                    bola_runtime_check.status = CheckStatus.BLOCKED
+                    bola_runtime_check.unverified_reason = "TestClient runtime unavailable; supplied BOLA fixture could not be executed."
+                else:
+                    bola_runtime_check.status = CheckStatus.NOT_APPLICABLE
 
         node.static_status = AuditStatus.FAILED if has_static_bola_flaw else AuditStatus.VERIFIED
-        node.runtime_status = AuditStatus.FAILED if (bola_runtime_check and bola_runtime_check.status == CheckStatus.FAILED) else (AuditStatus.VERIFIED if (http_exec_check and http_exec_check.status == CheckStatus.PASSED) else AuditStatus.UNVERIFIED)
+        runtime_checks = [c for c in (http_exec_check, bola_runtime_check) if c]
+        if any(c.status in (CheckStatus.FAILED, CheckStatus.ERROR) for c in runtime_checks):
+            node.runtime_status = AuditStatus.FAILED
+        elif runtime_checks and all(c.status in (CheckStatus.PASSED, CheckStatus.NOT_APPLICABLE) for c in runtime_checks):
+            node.runtime_status = AuditStatus.VERIFIED
+        else:
+            node.runtime_status = AuditStatus.UNVERIFIED
         node.refresh_audit_status(checks)
 
         return node.audit_status, {}, evidence_ids
+
+    def _execute_safe_probe(self, node: GraphNode, method: str, route_path: str, file_rel: str, check: Optional[AuditCheck], evidence_ids: list[str]) -> None:
+        """Probe only safe endpoints whose inputs are completely known."""
+        if not check:
+            return
+        if "{" in route_path or ":" in route_path or method not in {"GET", "HEAD"}:
+            check.status = CheckStatus.BLOCKED
+            check.unverified_reason = "No executable input contract supplied; auditor will not invent path parameters or request bodies."
+            return
+        try:
+            t0 = time.time()
+            response = self._test_client.request(method, route_path)
+            duration = round(time.time() - t0, 3)
+            check.status = CheckStatus.PASSED if response.status_code < 500 else CheckStatus.FAILED
+            check.details = {"status_code": response.status_code, "duration_seconds": duration, "execution_kind": "SAFE_PROBE"}
+            ev = self.evidence_store.add(
+                evidence_type=EvidenceType.API_RESPONSE, target_id=node.id,
+                summary=f"Actual ASGI safe probe {method} {route_path} returned HTTP {response.status_code} in {duration}s.",
+                source_location=file_rel,
+                payload={"route": route_path, "method": method, "status_code": response.status_code, "duration_seconds": duration, "execution_kind": "SAFE_PROBE"},
+                artifact_bytes=response.content, mime_type=response.headers.get("content-type", "application/octet-stream"), producer="APIRunnerVerifier",
+            )
+            evidence_ids.append(ev.id); check.evidence_ids.append(ev.id)
+        except Exception as ex:
+            check.status = CheckStatus.ERROR
+            check.unverified_reason = f"ASGI dispatch error: {type(ex).__name__}: {ex}"
+
+    def _execute_bola_contract(self, node: GraphNode, method: str, route_path: str, file_rel: str, check: Optional[AuditCheck], evidence_ids: list[str]) -> None:
+        """Perform a real owner-vs-attacker boundary test only with provisioned fixtures."""
+        if not check:
+            return
+        if not ("{" in route_path or ":" in route_path):
+            check.status = CheckStatus.NOT_APPLICABLE
+            return
+        contract = self._identity_fixtures.get(f"{method} {route_path}")
+        required = {"owner_headers", "attacker_headers", "owner_resource_path", "provisioning_evidence"}
+        if not isinstance(contract, dict) or not required.issubset(contract):
+            check.status = CheckStatus.BLOCKED
+            check.unverified_reason = "Requires provisioned owner/attacker fixture contract in .project-graph/identity-fixtures.json; no synthetic identities were used."
+            return
+        path = contract["owner_resource_path"]
+        if not isinstance(path, str) or not path.startswith("/"):
+            check.status = CheckStatus.BLOCKED
+            check.unverified_reason = "Identity fixture contract has an invalid owner_resource_path."
+            return
+        try:
+            owner = self._test_client.request(method, path, headers=contract["owner_headers"])
+            attacker = self._test_client.request(method, path, headers=contract["attacker_headers"])
+            forbidden = set(contract.get("forbidden_statuses", [401, 403, 404]))
+            if owner.status_code >= 400:
+                check.status = CheckStatus.BLOCKED
+                check.unverified_reason = f"Owner fixture did not establish access (HTTP {owner.status_code})."
+                return
+            check.status = CheckStatus.PASSED if attacker.status_code in forbidden else CheckStatus.FAILED
+            ev = self.evidence_store.add(
+                evidence_type=EvidenceType.AUTH_BOUNDARY_TEST, target_id=node.id,
+                summary=f"Actual BOLA boundary: owner HTTP {owner.status_code}; attacker HTTP {attacker.status_code}.", source_location=file_rel,
+                payload={"test_type": "BOLA_OWNER_ATTACKER_BOUNDARY", "owner_status": owner.status_code, "attacker_status": attacker.status_code,
+                         "forbidden_statuses": sorted(forbidden), "owner_resource_path": path,
+                         "owner_headers": self._redact_headers(contract["owner_headers"]), "attacker_headers": self._redact_headers(contract["attacker_headers"]),
+                         "provisioning_evidence": contract["provisioning_evidence"]},
+                artifact_bytes=b"OWNER:\n" + owner.content + b"\nATTACKER:\n" + attacker.content, producer="APIRunnerVerifier",
+            )
+            evidence_ids.append(ev.id); check.evidence_ids.append(ev.id)
+            if check.status == CheckStatus.FAILED:
+                self.evidence_store.add_claim(
+                    statement=f"Endpoint '{method} {route_path}' allowed a provisioned cross-tenant request.", target_id=node.id,
+                    evidence_ids=[ev.id], evidence_strength="RUNTIME_OBSERVED", status="CONFIRMED",
+                )
+        except Exception as ex:
+            check.status = CheckStatus.ERROR
+            check.unverified_reason = f"BOLA boundary execution failed: {type(ex).__name__}: {ex}"
 
     def _analyze_ast_bola(self, file_rel: str, handler_name: str) -> bool:
         """Inspect source AST to determine if query parameters omit user ownership tenancy filtering."""

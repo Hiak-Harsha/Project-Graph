@@ -158,7 +158,7 @@ def print_audit_report(summary: dict) -> None:
         bar = "#" * filled + "-" * (10 - filled)
         print(f"  {domain:<24} [{bar}] {score:>4}/10")
     print("-" * 70)
-    print(f"CHECK OBLIGATIONS:  {checks.get('total', 0)} Total ({checks.get('passed', 0)} Passed, {checks.get('failed', 0)} Failed, {checks.get('unverified', 0)} Unverified)")
+    print(f"CHECK OBLIGATIONS:  {checks.get('total', 0)} Total ({checks.get('passed', 0)} Passed, {checks.get('failed', 0)} Failed, {checks.get('unverified', 0)} Unverified, {checks.get('blocked', 0)} Blocked, {checks.get('errors', 0)} Errors)")
     print(f"MULTI-TIER COVERAGE: Static AST: {checks.get('static_coverage_pct', 100)}% | Dynamic Runtime: {checks.get('runtime_coverage_pct', 0)}%")
     print(f"P1 ACCOUNTING:      {c['terminal_entities'] + c['unverified_entities']} / {c['discovered_entities']} entities accounted for (P1 Invariant: {'PASS' if c['complete_accounting'] else 'FAIL'})")
     print("-" * 70)

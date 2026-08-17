@@ -6,7 +6,7 @@ READY | NOT PRODUCTION READY | READY WITH CONDITIONS
 """
 from __future__ import annotations
 
-from packages.project_graph.models import AuditStatus, FindingCategory, Severity
+from packages.project_graph.models import AuditStatus, CheckStatus, FindingCategory, Severity
 from packages.project_graph.store import ProjectGraph
 
 
@@ -23,9 +23,9 @@ class VerdictEngine:
         low_count = sum(1 for f in findings if f.severity == Severity.LOW and f.status == "CONFIRMED")
 
         # Check unverified critical obligations
-        unverified_critical_checks = [
+        unresolved_required_checks = [
             c for c in self.graph.audit_checks.values()
-            if c.required and c.status == "UNVERIFIED"
+            if c.required and c.status in (CheckStatus.UNVERIFIED, CheckStatus.BLOCKED, CheckStatus.ERROR, CheckStatus.PENDING, CheckStatus.RUNNING)
         ]
 
         # Compute Domain Scores (0.0 to 10.0)
@@ -70,8 +70,8 @@ class VerdictEngine:
             gate_failures.append(f"{critical_count} Critical security/integrity blocker(s) detected")
         if high_count >= 2:
             gate_failures.append(f"{high_count} High-risk vulnerabilities/dead user flows detected")
-        if len(unverified_critical_checks) > 10:
-            gate_failures.append(f"{len(unverified_critical_checks)} Required check obligations remain unverified")
+        if len(unresolved_required_checks) > 10:
+            gate_failures.append(f"{len(unresolved_required_checks)} Required check obligations remain unresolved (unverified, blocked, errored, or pending)")
 
         if gate_failures:
             status = "NOT PRODUCTION READY"
@@ -97,7 +97,7 @@ class VerdictEngine:
             "status_badge": status_badge,
             "overall_score": overall,
             "gate_failures": gate_failures,
-            "unverified_critical_checks_count": len(unverified_critical_checks),
+            "unverified_critical_checks_count": len(unresolved_required_checks),
             "domain_scores": {
                 "Architecture": score_arch,
                 "Security": score_security,

@@ -114,6 +114,9 @@ class ProjectGraph:
         passed_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.PASSED)
         failed_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.FAILED)
         unverified_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.UNVERIFIED)
+        blocked_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.BLOCKED)
+        error_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.ERROR)
+        pending_checks = sum(1 for c in self.audit_checks.values() if c.status in (CheckStatus.PENDING, CheckStatus.RUNNING))
         na_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.NOT_APPLICABLE)
         resolved_checks = passed_checks + failed_checks + na_checks
 
@@ -147,6 +150,9 @@ class ProjectGraph:
             "passed_check_obligations": passed_checks,
             "failed_check_obligations": failed_checks,
             "unverified_check_obligations": unverified_checks,
+            "blocked_check_obligations": blocked_checks,
+            "error_check_obligations": error_checks,
+            "pending_check_obligations": pending_checks,
             "check_coverage_pct": check_coverage_pct,
             # Multi-tier verification breakdown
             "static_obligations_total": static_total,
@@ -157,8 +163,8 @@ class ProjectGraph:
             "runtime_obligations_passed": runtime_passed,
             "runtime_coverage_pct": runtime_coverage,
             # Invariants
-            "complete_accounting": (resolved_checks + unverified_checks) == total_checks and (terminal_entities + unverified_entities) == discovered_entities,
-            "audit_fully_resolved": unverified_checks == 0 and unverified_entities == 0 and total_checks > 0,
+            "complete_accounting": (resolved_checks + unverified_checks + blocked_checks + error_checks + pending_checks) == total_checks and (terminal_entities + unverified_entities) == discovered_entities,
+            "audit_fully_resolved": (unverified_checks + blocked_checks + error_checks + pending_checks) == 0 and unverified_entities == 0 and total_checks > 0,
         }
 
     # -- serialization ----------------------------------------------------

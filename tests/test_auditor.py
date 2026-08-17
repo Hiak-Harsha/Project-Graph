@@ -24,9 +24,9 @@ from packages.discovery import (
     discover_ui_elements,
     fingerprint_project,
 )
-from packages.evidence import EvidenceStore, reset_evidence_counter
+from packages.evidence import EvidenceStore, EvidenceType, reset_evidence_counter
 from packages.intelligence import CompletenessEngine, CrossCheckEngine, VerdictEngine
-from packages.project_graph.models import NodeType, reset_id_counters
+from packages.project_graph.models import CheckStatus, NodeType, reset_id_counters
 from packages.project_graph.store import ProjectGraph
 from packages.verification import VerificationRunner
 from workers.audit_orchestrator import run_full_audit
@@ -127,6 +127,17 @@ class TestAuditorPlatform(unittest.TestCase):
         verdict = summary["verdict"]
         self.assertEqual(verdict["verdict_status"], "NOT PRODUCTION READY")
         self.assertGreater(len(verdict["gate_failures"]), 0)
+
+    def test_bola_runtime_never_uses_synthetic_identities(self):
+        """A missing owner/attacker fixture must block, never fabricate BOLA evidence."""
+        graph, evidence_store, summary = run_full_audit(FIXTURE_PATH)
+        endpoint = next(n for n in graph.nodes_of_type(NodeType.API_ENDPOINT) if n.name == "GET /api/resume/{id}")
+        bola_runtime = next(c for c in graph.get_checks_for_target(endpoint.id) if "BOLA-RUNTIME" in c.id)
+
+        self.assertEqual(bola_runtime.status, CheckStatus.BLOCKED)
+        self.assertIn("no synthetic identities", bola_runtime.unverified_reason)
+        self.assertFalse(any(e.evidence_type == EvidenceType.AUTH_BOUNDARY_TEST for e in evidence_store.find_by_target(endpoint.id)))
+        self.assertGreater(summary["completeness"]["check_obligations"]["blocked"], 0)
 
 
 if __name__ == "__main__":
