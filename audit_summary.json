@@ -1,0 +1,944 @@
+{
+  "repo_path": "C:\\Users\\madha\\Desktop\\Project Graph\\tests\\fixtures\\sample_career_app",
+  "fingerprint": {
+    "languages": [
+      "Prisma",
+      "Python",
+      "TypeScript"
+    ],
+    "frameworks": [
+      "FastAPI",
+      "React"
+    ],
+    "databases": [
+      "SQLAlchemy"
+    ],
+    "infrastructure": [],
+    "package_managers": [
+      "node",
+      "python-pip"
+    ]
+  },
+  "product_understanding": {
+    "product_archetype": "Career Platform & Resume Intelligence Engine",
+    "core_features": [
+      "Authentication & Authorization",
+      "Resume Generation & Management"
+    ],
+    "explicit_requirements": [
+      "User Authentication and Secure Session Management",
+      "Resume Generation using Generative AI Models",
+      "Career Graph Visualization of technical skill pathways",
+      "Personalized Job Recommendations and Analytics",
+      "User Authentication and Secure Session Management",
+      "Resume Generation using Generative AI Models",
+      "Career Graph Visualization of technical skill pathways",
+      "Personalized Job Recommendations and Analytics"
+    ],
+    "detected_services": [
+      "OpenAI API"
+    ],
+    "database_models": [
+      "Model: LoginRequest",
+      "Model: GenerateResumeRequest",
+      "Model: User",
+      "Model: Resume"
+    ],
+    "total_endpoints": 8,
+    "primary_workflows": [
+      "User Authentication & Session Management (Register, Login, Token Issuance)",
+      "Resume Generation & Customization Workflow (Input data -> AI Generation -> DB Storage -> Export)"
+    ]
+  },
+  "entity_counts": {
+    "FILE": 9,
+    "PACKAGE": 15,
+    "CLASS": 2,
+    "FUNCTION": 7,
+    "UI_ELEMENT": 3,
+    "API_ENDPOINT": 8,
+    "DATABASE_ENTITY": 4,
+    "EXTERNAL_SERVICE": 1,
+    "TEST": 9,
+    "REQUIREMENT": 8,
+    "FEATURE": 2
+  },
+  "status_counts": {
+    "VERIFIED": 57,
+    "FAILED": 11
+  },
+  "verification_stats": {
+    "tasks_completed": 13,
+    "tasks_failed": 2,
+    "total_tasks": 18,
+    "evidence_count": 26,
+    "elapsed_seconds": 0.007
+  },
+  "adversarial_stats": {
+    "confirmed": 7,
+    "downgraded": 0,
+    "rejected": 0,
+    "total_reviewed": 7
+  },
+  "completeness": {
+    "discovered_entities": 68,
+    "verified_entities": 57,
+    "failed_entities": 11,
+    "na_entities": 0,
+    "terminal_entities": 68,
+    "unverified_entities": 0,
+    "audit_coverage_pct": 100.0,
+    "complete_accounting": true,
+    "audit_fully_resolved": true,
+    "by_category": {
+      "FILE": {
+        "total_discovered": 9,
+        "verified": 9,
+        "failed": 0,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "PACKAGE": {
+        "total_discovered": 15,
+        "verified": 15,
+        "failed": 0,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "FUNCTION": {
+        "total_discovered": 7,
+        "verified": 7,
+        "failed": 0,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "CLASS": {
+        "total_discovered": 2,
+        "verified": 2,
+        "failed": 0,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "UI_ELEMENT": {
+        "total_discovered": 3,
+        "verified": 1,
+        "failed": 2,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "API_ENDPOINT": {
+        "total_discovered": 8,
+        "verified": 6,
+        "failed": 2,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "DATABASE_ENTITY": {
+        "total_discovered": 4,
+        "verified": 4,
+        "failed": 0,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "EXTERNAL_SERVICE": {
+        "total_discovered": 1,
+        "verified": 1,
+        "failed": 0,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "TEST": {
+        "total_discovered": 9,
+        "verified": 9,
+        "failed": 0,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "FEATURE": {
+        "total_discovered": 2,
+        "verified": 1,
+        "failed": 1,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      },
+      "REQUIREMENT": {
+        "total_discovered": 8,
+        "verified": 2,
+        "failed": 6,
+        "unverified": 0,
+        "not_applicable": 0,
+        "coverage_pct": 100.0
+      }
+    }
+  },
+  "verdict": {
+    "verdict_status": "NOT PRODUCTION READY",
+    "status_badge": "FAILED",
+    "overall_score": 7.3,
+    "domain_scores": {
+      "Architecture": 9.5,
+      "Security": 3.0,
+      "Reliability": 10.0,
+      "Testing": 10.0,
+      "User Experience (UX)": 6.0,
+      "Product Requirements": 7.0
+    },
+    "findings_summary": {
+      "critical": 2,
+      "high": 3,
+      "medium": 1,
+      "low": 1,
+      "total": 7
+    },
+    "top_blockers": [
+      {
+        "id": "FINDING-0003",
+        "title": "Broken Object-Level Authorization (BOLA / IDOR) on 'GET /api/resume/{id}'",
+        "category": "SECURITY",
+        "severity": "CRITICAL",
+        "status": "CONFIRMED",
+        "confidence": 0.99,
+        "affected_feature": "Authorization & Access Control",
+        "affected_nodes": [
+          "API-0003"
+        ],
+        "description": "Endpoint 'GET /api/resume/{id}' accepts a resource identifier parameter without verifying that the authenticated user possesses ownership of that resource.",
+        "observed_behavior": "Direct object reference can be queried by any authenticated or unauthenticated client without user ID tenancy scoping.",
+        "expected_behavior": "The backend must assert `resource.user_id == current_user.id` and reject unauthorized requests with HTTP 403 Forbidden.",
+        "evidence_ids": [
+          "EV-00012"
+        ],
+        "root_cause": "Missing ownership assertion in database query filter or authorization middleware.",
+        "recommendation": "Add user tenancy check in the repository filter or query layer.",
+        "reproduction_steps": [
+          "1. Send GET to /api/resume/{id} as User A with User B's resource ID",
+          "2. Observe server returning 200 OK with User B's private data instead of 403 Forbidden."
+        ],
+        "adversarial_verdict": "CONFIRM"
+      },
+      {
+        "id": "FINDING-0004",
+        "title": "Broken Object-Level Authorization (BOLA / IDOR) on 'GET /api/resume/{id}'",
+        "category": "SECURITY",
+        "severity": "CRITICAL",
+        "status": "CONFIRMED",
+        "confidence": 0.99,
+        "affected_feature": "Authorization & Access Control",
+        "affected_nodes": [
+          "API-0007"
+        ],
+        "description": "Endpoint 'GET /api/resume/{id}' accepts a resource identifier parameter without verifying that the authenticated user possesses ownership of that resource.",
+        "observed_behavior": "Direct object reference can be queried by any authenticated or unauthenticated client without user ID tenancy scoping.",
+        "expected_behavior": "The backend must assert `resource.user_id == current_user.id` and reject unauthorized requests with HTTP 403 Forbidden.",
+        "evidence_ids": [
+          "EV-00013"
+        ],
+        "root_cause": "Missing ownership assertion in database query filter or authorization middleware.",
+        "recommendation": "Add user tenancy check in the repository filter or query layer.",
+        "reproduction_steps": [
+          "1. Send GET to /api/resume/{id} as User A with User B's resource ID",
+          "2. Observe server returning 200 OK with User B's private data instead of 403 Forbidden."
+        ],
+        "adversarial_verdict": "CONFIRM"
+      },
+      {
+        "id": "FINDING-0001",
+        "title": "Dead UI Interaction: 'BUTTON: Export Resume' has no execution handler",
+        "category": "DEAD_FUNCTIONALITY",
+        "severity": "HIGH",
+        "status": "CONFIRMED",
+        "confidence": 0.99,
+        "affected_feature": "Resume Generation & Management",
+        "affected_nodes": [
+          "UI-0001"
+        ],
+        "description": "UI element 'BUTTON: Export Resume' in frontend/src/components/DeadButtonComponent.tsx is rendered as an actionable control but has no attached event listener, handler function, or navigation target.",
+        "observed_behavior": "Clicking the element produces no observable state mutation, API request, navigation, or download.",
+        "expected_behavior": "Clicking an actionable button or link should trigger the designated business operation or navigation.",
+        "evidence_ids": [
+          "EV-00001"
+        ],
+        "root_cause": "Event handler attribute is missing or unbound in component JSX.",
+        "recommendation": "Attach a valid handler function or remove the 'Export Resume' control from frontend/src/components/DeadButtonComponent.tsx.",
+        "reproduction_steps": [
+          "1. Navigate to component at frontend/src/components/DeadButtonComponent.tsx:7",
+          "2. Inspect element 'Export Resume'",
+          "3. Click element and observe no event dispatch or network call."
+        ],
+        "adversarial_verdict": "CONFIRM"
+      },
+      {
+        "id": "FINDING-0002",
+        "title": "Dead UI Interaction: 'LINK: Download PDF' has no execution handler",
+        "category": "DEAD_FUNCTIONALITY",
+        "severity": "HIGH",
+        "status": "CONFIRMED",
+        "confidence": 0.99,
+        "affected_feature": "UI Core",
+        "affected_nodes": [
+          "UI-0002"
+        ],
+        "description": "UI element 'LINK: Download PDF' in frontend/src/components/DeadButtonComponent.tsx is rendered as an actionable control but has no attached event listener, handler function, or navigation target.",
+        "observed_behavior": "Clicking the element produces no observable state mutation, API request, navigation, or download.",
+        "expected_behavior": "Clicking an actionable button or link should trigger the designated business operation or navigation.",
+        "evidence_ids": [
+          "EV-00002"
+        ],
+        "root_cause": "Event handler attribute is missing or unbound in component JSX.",
+        "recommendation": "Attach a valid handler function or remove the 'Download PDF' control from frontend/src/components/DeadButtonComponent.tsx.",
+        "reproduction_steps": [
+          "1. Navigate to component at frontend/src/components/DeadButtonComponent.tsx:10",
+          "2. Inspect element 'Download PDF'",
+          "3. Click element and observe no event dispatch or network call."
+        ],
+        "adversarial_verdict": "CONFIRM"
+      },
+      {
+        "id": "FINDING-0005",
+        "title": "Missing Requirement: Rate Limiting on Authentication Endpoints",
+        "category": "MISSING_REQUIREMENT",
+        "severity": "HIGH",
+        "status": "CONFIRMED",
+        "confidence": 0.6,
+        "affected_feature": "Authentication & Authorization",
+        "affected_nodes": [
+          "API-0001",
+          "API-0005"
+        ],
+        "description": "Authentication endpoints (/login, /token) do not enforce rate-limiting or IP-based throttling.",
+        "observed_behavior": "Clients can submit unlimited rapid credential attempts without encountering HTTP 429 Too Many Requests.",
+        "expected_behavior": "Production authentication endpoints must enforce rate limits (e.g. max 5 failed attempts per minute per IP).",
+        "evidence_ids": [
+          "EV-00027"
+        ],
+        "root_cause": "Absence of rate limiting middleware (e.g. slowapi, express-rate-limit, or Redis token bucket).",
+        "recommendation": "Install and attach a rate limiting middleware to all public authentication and credential endpoints.",
+        "reproduction_steps": [
+          "1. Send 100 consecutive requests to login endpoint",
+          "2. Observe all 100 requests processed without throttling."
+        ],
+        "adversarial_verdict": "CONFIRM"
+      }
+    ]
+  },
+  "evidence_records": [
+    {
+      "id": "EV-00001",
+      "evidence_type": "DOM_INTERACTION",
+      "target_id": "UI-0001",
+      "summary": "Dead UI interaction: 'Export Resume' has no onClick/onSubmit handler or valid href.",
+      "source_location": "frontend/src/components/DeadButtonComponent.tsx:7",
+      "payload": {
+        "element_type": "BUTTON",
+        "label": "Export Resume",
+        "file": "frontend/src/components/DeadButtonComponent.tsx",
+        "line": 7,
+        "has_handler": false,
+        "observation": "Element is rendered as actionable control but produces no behavior on click."
+      },
+      "sha256_hash": "df58d1360e1d7ac711e1de3a6e7b5c6e3629505168bedb4a6bca5a2ad52ea04f",
+      "timestamp": 1786989637.580349
+    },
+    {
+      "id": "EV-00002",
+      "evidence_type": "DOM_INTERACTION",
+      "target_id": "UI-0002",
+      "summary": "Dead UI interaction: 'Download PDF' has no onClick/onSubmit handler or valid href.",
+      "source_location": "frontend/src/components/DeadButtonComponent.tsx:10",
+      "payload": {
+        "element_type": "LINK",
+        "label": "Download PDF",
+        "file": "frontend/src/components/DeadButtonComponent.tsx",
+        "line": 10,
+        "has_handler": false,
+        "observation": "Element is rendered as actionable control but produces no behavior on click."
+      },
+      "sha256_hash": "d5d310bf62d43d3a9beee46e8ce0ee8525f6e71f2e56fd6fc157b3f90283a216",
+      "timestamp": 1786989637.5809472
+    },
+    {
+      "id": "EV-00003",
+      "evidence_type": "DOM_INTERACTION",
+      "target_id": "UI-0003",
+      "summary": "UI element '{loading ? 'Generating...' : 'Generate Resume'}' verified: handler 'handleGenerate' attached.",
+      "source_location": "frontend/src/components/ResumeGenerator.tsx:29",
+      "payload": {
+        "element_type": "BUTTON",
+        "label": "{loading ? 'Generating...' : 'Generate Resume'}",
+        "handler": "handleGenerate",
+        "has_loading_state": true,
+        "has_error_state": true
+      },
+      "sha256_hash": "427f6ef21b03ac88eb7ac198d51f8d524e8ee1ea635a75023f17bd6fdbb85c6d",
+      "timestamp": 1786989637.5813656
+    },
+    {
+      "id": "EV-00004",
+      "evidence_type": "API_RESPONSE",
+      "target_id": "API-0001",
+      "summary": "API endpoint 'POST /api/auth/login' statically verified (Validation: False, Error Handling: True).",
+      "source_location": "backend/app/main.py:20",
+      "payload": {
+        "method": "POST",
+        "path": "/api/auth/login",
+        "input_validation": false,
+        "error_handling": true,
+        "auth_present": true
+      },
+      "sha256_hash": "831d56eefff1711bb237d4571e9dc15b90c7838253ab30492c3290b5b1e97875",
+      "timestamp": 1786989637.5819457
+    },
+    {
+      "id": "EV-00005",
+      "evidence_type": "API_RESPONSE",
+      "target_id": "API-0002",
+      "summary": "API endpoint 'POST /api/resume/generate' statically verified (Validation: False, Error Handling: True).",
+      "source_location": "backend/app/main.py:27",
+      "payload": {
+        "method": "POST",
+        "path": "/api/resume/generate",
+        "input_validation": false,
+        "error_handling": true,
+        "auth_present": true
+      },
+      "sha256_hash": "da68de5a54c652e50c475caf3d17d56df00a3110f3cd6da8922032bcf9badbb9",
+      "timestamp": 1786989637.5823853
+    },
+    {
+      "id": "EV-00006",
+      "evidence_type": "API_RESPONSE",
+      "target_id": "API-0003",
+      "summary": "API endpoint 'GET /api/resume/{id}' statically verified (Validation: True, Error Handling: True).",
+      "source_location": "backend/app/main.py:37",
+      "payload": {
+        "method": "GET",
+        "path": "/api/resume/{id}",
+        "input_validation": true,
+        "error_handling": true,
+        "auth_present": true
+      },
+      "sha256_hash": "5a894673761b00cf29eef616717f88850fbd54df0ccf15dda2cc2d9b9849ef38",
+      "timestamp": 1786989637.5827267
+    },
+    {
+      "id": "EV-00007",
+      "evidence_type": "API_RESPONSE",
+      "target_id": "API-0004",
+      "summary": "API endpoint 'POST /api/resumes/upload' statically verified (Validation: False, Error Handling: True).",
+      "source_location": "backend/app/main.py:45",
+      "payload": {
+        "method": "POST",
+        "path": "/api/resumes/upload",
+        "input_validation": false,
+        "error_handling": true,
+        "auth_present": true
+      },
+      "sha256_hash": "24ea2d05320ce4d875440b115df040efbd1fe0a37119a3e6273951ae10587fc4",
+      "timestamp": 1786989637.5831025
+    },
+    {
+      "id": "EV-00008",
+      "evidence_type": "API_RESPONSE",
+      "target_id": "API-0005",
+      "summary": "API endpoint 'POST /api/auth/login' statically verified (Validation: False, Error Handling: True).",
+      "source_location": "backend/app/main.py:20",
+      "payload": {
+        "method": "POST",
+        "path": "/api/auth/login",
+        "input_validation": false,
+        "error_handling": true,
+        "auth_present": true
+      },
+      "sha256_hash": "335508a4289181c1d2e3dabd9963cd475452f18aff190028f276d7e96b708405",
+      "timestamp": 1786989637.583484
+    },
+    {
+      "id": "EV-00009",
+      "evidence_type": "API_RESPONSE",
+      "target_id": "API-0006",
+      "summary": "API endpoint 'POST /api/resume/generate' statically verified (Validation: False, Error Handling: True).",
+      "source_location": "backend/app/main.py:27",
+      "payload": {
+        "method": "POST",
+        "path": "/api/resume/generate",
+        "input_validation": false,
+        "error_handling": true,
+        "auth_present": true
+      },
+      "sha256_hash": "db7221b6e329872858843ffa81ec1c9b6d403cb893882700fc6006632dc11a7c",
+      "timestamp": 1786989637.5837886
+    },
+    {
+      "id": "EV-00010",
+      "evidence_type": "API_RESPONSE",
+      "target_id": "API-0007",
+      "summary": "API endpoint 'GET /api/resume/{id}' statically verified (Validation: True, Error Handling: True).",
+      "source_location": "backend/app/main.py:37",
+      "payload": {
+        "method": "GET",
+        "path": "/api/resume/{id}",
+        "input_validation": true,
+        "error_handling": true,
+        "auth_present": true
+      },
+      "sha256_hash": "f21c40767ac1c99a86f55a7941dcff1afb371850dc6a84e656ff61ae8b881d8f",
+      "timestamp": 1786989637.5841777
+    },
+    {
+      "id": "EV-00011",
+      "evidence_type": "API_RESPONSE",
+      "target_id": "API-0008",
+      "summary": "API endpoint 'POST /api/resumes/upload' statically verified (Validation: False, Error Handling: True).",
+      "source_location": "backend/app/main.py:45",
+      "payload": {
+        "method": "POST",
+        "path": "/api/resumes/upload",
+        "input_validation": false,
+        "error_handling": true,
+        "auth_present": true
+      },
+      "sha256_hash": "05792e40574d64383564919c629d775e53fa194c90599feb92e3d6bd7de2f23b",
+      "timestamp": 1786989637.58445
+    },
+    {
+      "id": "EV-00012",
+      "evidence_type": "AUTH_BOUNDARY_TEST",
+      "target_id": "API-0003",
+      "summary": "Broken Object-Level Authorization (BOLA / IDOR) on 'GET /api/resume/{id}'.",
+      "source_location": "backend/app/main.py:37",
+      "payload": {
+        "endpoint": "GET /api/resume/{id}",
+        "resource_identifier": "{id}",
+        "file": "backend/app/main.py",
+        "line": 37,
+        "observed_flaw": "Endpoint queries record by ID without asserting ownership against the authenticated session.",
+        "attack_scenario": "User A can supply User B's resource ID and access/modify private records.",
+        "severity": "CRITICAL"
+      },
+      "sha256_hash": "ffafc43eee4bfefa6dbfff73c566c909a4057aba120e24a43d6d88b1b56a6ead",
+      "timestamp": 1786989637.5855584
+    },
+    {
+      "id": "EV-00013",
+      "evidence_type": "AUTH_BOUNDARY_TEST",
+      "target_id": "API-0007",
+      "summary": "Broken Object-Level Authorization (BOLA / IDOR) on 'GET /api/resume/{id}'.",
+      "source_location": "backend/app/main.py:37",
+      "payload": {
+        "endpoint": "GET /api/resume/{id}",
+        "resource_identifier": "{id}",
+        "file": "backend/app/main.py",
+        "line": 37,
+        "observed_flaw": "Endpoint queries record by ID without asserting ownership against the authenticated session.",
+        "attack_scenario": "User A can supply User B's resource ID and access/modify private records.",
+        "severity": "CRITICAL"
+      },
+      "sha256_hash": "59fab5cf483e753bf33b35f7462c6f5a9f6eb59da15c986654ceab793cf3bbc6",
+      "timestamp": 1786989637.5859377
+    },
+    {
+      "id": "EV-00014",
+      "evidence_type": "DATABASE_OBSERVATION",
+      "target_id": "DB-0001",
+      "summary": "Database entity 'Model: LoginRequest' schema definition validated.",
+      "source_location": "backend/app/main.py:7",
+      "payload": {
+        "model": "Model: LoginRequest",
+        "orm": "sqlalchemy"
+      },
+      "sha256_hash": "68b1b5ad43b8627aeb40c978a57ec26829a49dc6102b65beb3a098c6a174839c",
+      "timestamp": 1786989637.5860257
+    },
+    {
+      "id": "EV-00015",
+      "evidence_type": "DATABASE_OBSERVATION",
+      "target_id": "DB-0002",
+      "summary": "Database entity 'Model: GenerateResumeRequest' schema definition validated.",
+      "source_location": "backend/app/main.py:11",
+      "payload": {
+        "model": "Model: GenerateResumeRequest",
+        "orm": "sqlalchemy"
+      },
+      "sha256_hash": "c91129b77a6c185ecf04686ee81e6d2d2eeff36e6a6bcb2671968d04e2051a40",
+      "timestamp": 1786989637.5860584
+    },
+    {
+      "id": "EV-00016",
+      "evidence_type": "DATABASE_OBSERVATION",
+      "target_id": "DB-0003",
+      "summary": "Database entity 'Model: User' schema definition validated.",
+      "source_location": "schema.prisma:10",
+      "payload": {
+        "model": "Model: User",
+        "orm": "prisma"
+      },
+      "sha256_hash": "a1c5b082601b244eb5147cd4a09e57b3cf90a7f8e7750e046fd8c7d18322cccf",
+      "timestamp": 1786989637.5860808
+    },
+    {
+      "id": "EV-00017",
+      "evidence_type": "DATABASE_OBSERVATION",
+      "target_id": "DB-0004",
+      "summary": "Database entity 'Model: Resume' schema definition validated.",
+      "source_location": "schema.prisma:18",
+      "payload": {
+        "model": "Model: Resume",
+        "orm": "prisma"
+      },
+      "sha256_hash": "d906f893d958509dc78198c35ec01ae4e0b474bbad245b21b8e7957ddd747454",
+      "timestamp": 1786989637.586133
+    },
+    {
+      "id": "EV-00018",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0001",
+      "summary": "Test suite 'backend/app/main.py' cataloged (1 cases).",
+      "source_location": "backend/app/main.py",
+      "payload": {
+        "suite": "backend/app/main.py",
+        "cases": []
+      },
+      "sha256_hash": "cfd0c5398387dceafa953f9ff16b53a628f80568aebe7e1a5a907742d9fdb795",
+      "timestamp": 1786989637.5861685
+    },
+    {
+      "id": "EV-00019",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0002",
+      "summary": "Test suite 'frontend/src/components/DeadButtonComponent.tsx' cataloged (1 cases).",
+      "source_location": "frontend/src/components/DeadButtonComponent.tsx",
+      "payload": {
+        "suite": "frontend/src/components/DeadButtonComponent.tsx",
+        "cases": []
+      },
+      "sha256_hash": "f0c864dc56c70a9d30c1827458460b9d3d0bfb0d2059f34616b66a3165722878",
+      "timestamp": 1786989637.586196
+    },
+    {
+      "id": "EV-00020",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0003",
+      "summary": "Test suite 'frontend/src/components/ResumeGenerator.tsx' cataloged (1 cases).",
+      "source_location": "frontend/src/components/ResumeGenerator.tsx",
+      "payload": {
+        "suite": "frontend/src/components/ResumeGenerator.tsx",
+        "cases": []
+      },
+      "sha256_hash": "45b9370a4957929fb05a40bd0ca1d9091ca86384f0553808cb00c42daa71db3f",
+      "timestamp": 1786989637.5862203
+    },
+    {
+      "id": "EV-00021",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0004",
+      "summary": "Test suite 'frontend/src/pages/Dashboard.tsx' cataloged (1 cases).",
+      "source_location": "frontend/src/pages/Dashboard.tsx",
+      "payload": {
+        "suite": "frontend/src/pages/Dashboard.tsx",
+        "cases": []
+      },
+      "sha256_hash": "83b31a86845b8f012dcd391a53714cb75027bb6057696a97213b046285649c40",
+      "timestamp": 1786989637.5862412
+    },
+    {
+      "id": "EV-00022",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0005",
+      "summary": "Test suite 'package.json' cataloged (1 cases).",
+      "source_location": "package.json",
+      "payload": {
+        "suite": "package.json",
+        "cases": []
+      },
+      "sha256_hash": "f99800547b595c7c11d66b5cb07db838619ebda25c4bab1efb25988e36088ab2",
+      "timestamp": 1786989637.5862637
+    },
+    {
+      "id": "EV-00023",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0006",
+      "summary": "Test suite 'README.md' cataloged (1 cases).",
+      "source_location": "README.md",
+      "payload": {
+        "suite": "README.md",
+        "cases": []
+      },
+      "sha256_hash": "1665615555324df187c591295e8269430e22cd34a0614b0996ac720c271b90da",
+      "timestamp": 1786989637.586284
+    },
+    {
+      "id": "EV-00024",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0007",
+      "summary": "Test suite 'requirements.txt' cataloged (1 cases).",
+      "source_location": "requirements.txt",
+      "payload": {
+        "suite": "requirements.txt",
+        "cases": []
+      },
+      "sha256_hash": "5eb0e6bda0ade27694309d79bc12ee71a781b8d033d706e9af7b7130bdc95cc5",
+      "timestamp": 1786989637.5862975
+    },
+    {
+      "id": "EV-00025",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0008",
+      "summary": "Test suite 'schema.prisma' cataloged (1 cases).",
+      "source_location": "schema.prisma",
+      "payload": {
+        "suite": "schema.prisma",
+        "cases": []
+      },
+      "sha256_hash": "e38d954d89bfcb45388912e81441f6d55c345777432cc0e7998928a1019aaede",
+      "timestamp": 1786989637.5863101
+    },
+    {
+      "id": "EV-00026",
+      "evidence_type": "TEST_EXECUTION",
+      "target_id": "TEST-0009",
+      "summary": "Test suite 'tests/test_auth.py' cataloged (2 cases).",
+      "source_location": "tests/test_auth.py",
+      "payload": {
+        "suite": "tests/test_auth.py",
+        "cases": [
+          "test_login_success",
+          "test_login_invalid_password"
+        ]
+      },
+      "sha256_hash": "3551c5c9d0b9c995540dfa4e66df779d16fca7450ced9c60741fedb363d8f1a1",
+      "timestamp": 1786989637.5863225
+    },
+    {
+      "id": "EV-00027",
+      "evidence_type": "STATIC_ANALYSIS",
+      "target_id": "API-0001",
+      "summary": "Authentication routes lack rate limiting middleware or brute-force throttling.",
+      "source_location": "backend/app/main.py",
+      "payload": {
+        "auth_endpoints": [
+          "POST /api/auth/login",
+          "POST /api/auth/login"
+        ],
+        "rate_limiter_present": false
+      },
+      "sha256_hash": "ff79097997c03c4558f4bf2e8f1d3cf05d6b4907a751a5cdf8474e8484fa92ab",
+      "timestamp": 1786989637.5868635
+    },
+    {
+      "id": "EV-00028",
+      "evidence_type": "STATIC_ANALYSIS",
+      "target_id": "API-0004",
+      "summary": "File upload endpoint lacks explicit file size limitation or MIME-type allowlist.",
+      "source_location": "backend/app/main.py",
+      "payload": {
+        "upload_endpoint": "POST /api/resumes/upload"
+      },
+      "sha256_hash": "5fbc0eb0a6d86c5f8f56bd235c23340ddbb2ff6baa17d2d1485b6a41a6b2a47f",
+      "timestamp": 1786989637.5869188
+    },
+    {
+      "id": "EV-00029",
+      "evidence_type": "STATIC_ANALYSIS",
+      "target_id": "EXT-0001",
+      "summary": "AI Provider integration is tightly coupled directly to resume controller.",
+      "source_location": "backend/app/main.py",
+      "payload": {
+        "service": "OpenAI API"
+      },
+      "sha256_hash": "24cda1ca603b9ff853463eb10d6bea0fa258b464b3ebabb1068aa9865a67f874",
+      "timestamp": 1786989637.5869825
+    }
+  ],
+  "findings": [
+    {
+      "id": "FINDING-0001",
+      "title": "Dead UI Interaction: 'BUTTON: Export Resume' has no execution handler",
+      "category": "DEAD_FUNCTIONALITY",
+      "severity": "HIGH",
+      "status": "CONFIRMED",
+      "confidence": 0.99,
+      "affected_feature": "Resume Generation & Management",
+      "affected_nodes": [
+        "UI-0001"
+      ],
+      "description": "UI element 'BUTTON: Export Resume' in frontend/src/components/DeadButtonComponent.tsx is rendered as an actionable control but has no attached event listener, handler function, or navigation target.",
+      "observed_behavior": "Clicking the element produces no observable state mutation, API request, navigation, or download.",
+      "expected_behavior": "Clicking an actionable button or link should trigger the designated business operation or navigation.",
+      "evidence_ids": [
+        "EV-00001"
+      ],
+      "root_cause": "Event handler attribute is missing or unbound in component JSX.",
+      "recommendation": "Attach a valid handler function or remove the 'Export Resume' control from frontend/src/components/DeadButtonComponent.tsx.",
+      "reproduction_steps": [
+        "1. Navigate to component at frontend/src/components/DeadButtonComponent.tsx:7",
+        "2. Inspect element 'Export Resume'",
+        "3. Click element and observe no event dispatch or network call."
+      ],
+      "adversarial_verdict": "CONFIRM"
+    },
+    {
+      "id": "FINDING-0002",
+      "title": "Dead UI Interaction: 'LINK: Download PDF' has no execution handler",
+      "category": "DEAD_FUNCTIONALITY",
+      "severity": "HIGH",
+      "status": "CONFIRMED",
+      "confidence": 0.99,
+      "affected_feature": "UI Core",
+      "affected_nodes": [
+        "UI-0002"
+      ],
+      "description": "UI element 'LINK: Download PDF' in frontend/src/components/DeadButtonComponent.tsx is rendered as an actionable control but has no attached event listener, handler function, or navigation target.",
+      "observed_behavior": "Clicking the element produces no observable state mutation, API request, navigation, or download.",
+      "expected_behavior": "Clicking an actionable button or link should trigger the designated business operation or navigation.",
+      "evidence_ids": [
+        "EV-00002"
+      ],
+      "root_cause": "Event handler attribute is missing or unbound in component JSX.",
+      "recommendation": "Attach a valid handler function or remove the 'Download PDF' control from frontend/src/components/DeadButtonComponent.tsx.",
+      "reproduction_steps": [
+        "1. Navigate to component at frontend/src/components/DeadButtonComponent.tsx:10",
+        "2. Inspect element 'Download PDF'",
+        "3. Click element and observe no event dispatch or network call."
+      ],
+      "adversarial_verdict": "CONFIRM"
+    },
+    {
+      "id": "FINDING-0003",
+      "title": "Broken Object-Level Authorization (BOLA / IDOR) on 'GET /api/resume/{id}'",
+      "category": "SECURITY",
+      "severity": "CRITICAL",
+      "status": "CONFIRMED",
+      "confidence": 0.99,
+      "affected_feature": "Authorization & Access Control",
+      "affected_nodes": [
+        "API-0003"
+      ],
+      "description": "Endpoint 'GET /api/resume/{id}' accepts a resource identifier parameter without verifying that the authenticated user possesses ownership of that resource.",
+      "observed_behavior": "Direct object reference can be queried by any authenticated or unauthenticated client without user ID tenancy scoping.",
+      "expected_behavior": "The backend must assert `resource.user_id == current_user.id` and reject unauthorized requests with HTTP 403 Forbidden.",
+      "evidence_ids": [
+        "EV-00012"
+      ],
+      "root_cause": "Missing ownership assertion in database query filter or authorization middleware.",
+      "recommendation": "Add user tenancy check in the repository filter or query layer.",
+      "reproduction_steps": [
+        "1. Send GET to /api/resume/{id} as User A with User B's resource ID",
+        "2. Observe server returning 200 OK with User B's private data instead of 403 Forbidden."
+      ],
+      "adversarial_verdict": "CONFIRM"
+    },
+    {
+      "id": "FINDING-0004",
+      "title": "Broken Object-Level Authorization (BOLA / IDOR) on 'GET /api/resume/{id}'",
+      "category": "SECURITY",
+      "severity": "CRITICAL",
+      "status": "CONFIRMED",
+      "confidence": 0.99,
+      "affected_feature": "Authorization & Access Control",
+      "affected_nodes": [
+        "API-0007"
+      ],
+      "description": "Endpoint 'GET /api/resume/{id}' accepts a resource identifier parameter without verifying that the authenticated user possesses ownership of that resource.",
+      "observed_behavior": "Direct object reference can be queried by any authenticated or unauthenticated client without user ID tenancy scoping.",
+      "expected_behavior": "The backend must assert `resource.user_id == current_user.id` and reject unauthorized requests with HTTP 403 Forbidden.",
+      "evidence_ids": [
+        "EV-00013"
+      ],
+      "root_cause": "Missing ownership assertion in database query filter or authorization middleware.",
+      "recommendation": "Add user tenancy check in the repository filter or query layer.",
+      "reproduction_steps": [
+        "1. Send GET to /api/resume/{id} as User A with User B's resource ID",
+        "2. Observe server returning 200 OK with User B's private data instead of 403 Forbidden."
+      ],
+      "adversarial_verdict": "CONFIRM"
+    },
+    {
+      "id": "FINDING-0005",
+      "title": "Missing Requirement: Rate Limiting on Authentication Endpoints",
+      "category": "MISSING_REQUIREMENT",
+      "severity": "HIGH",
+      "status": "CONFIRMED",
+      "confidence": 0.6,
+      "affected_feature": "Authentication & Authorization",
+      "affected_nodes": [
+        "API-0001",
+        "API-0005"
+      ],
+      "description": "Authentication endpoints (/login, /token) do not enforce rate-limiting or IP-based throttling.",
+      "observed_behavior": "Clients can submit unlimited rapid credential attempts without encountering HTTP 429 Too Many Requests.",
+      "expected_behavior": "Production authentication endpoints must enforce rate limits (e.g. max 5 failed attempts per minute per IP).",
+      "evidence_ids": [
+        "EV-00027"
+      ],
+      "root_cause": "Absence of rate limiting middleware (e.g. slowapi, express-rate-limit, or Redis token bucket).",
+      "recommendation": "Install and attach a rate limiting middleware to all public authentication and credential endpoints.",
+      "reproduction_steps": [
+        "1. Send 100 consecutive requests to login endpoint",
+        "2. Observe all 100 requests processed without throttling."
+      ],
+      "adversarial_verdict": "CONFIRM"
+    },
+    {
+      "id": "FINDING-0006",
+      "title": "Missing Requirement: File Upload Size and MIME-Type Constraints",
+      "category": "MISSING_REQUIREMENT",
+      "severity": "MEDIUM",
+      "status": "CONFIRMED",
+      "confidence": 0.6,
+      "affected_feature": "File Management",
+      "affected_nodes": [
+        "API-0004",
+        "API-0008"
+      ],
+      "description": "File upload endpoints do not restrict maximum file payload size or validate binary magic bytes against an allowlist.",
+      "observed_behavior": "Unbounded file uploads may cause memory exhaustion (DoS) or allow arbitrary file storage.",
+      "expected_behavior": "Enforce a strict maximum size limit (e.g. 5MB) and validate allowed extensions (.pdf, .docx).",
+      "evidence_ids": [
+        "EV-00028"
+      ],
+      "root_cause": "Missing file validation schema in upload route handler.",
+      "recommendation": "Add multipart file validation checking `content-length` and file headers before streaming to storage.",
+      "reproduction_steps": [
+        "1. Attempt uploading a 50MB file",
+        "2. Server accepts upload without pre-flight size check."
+      ],
+      "adversarial_verdict": "CONFIRM"
+    },
+    {
+      "id": "FINDING-0007",
+      "title": "Architecture Debt: Direct Coupling to Single AI Model Provider",
+      "category": "ARCHITECTURE",
+      "severity": "LOW",
+      "status": "CONFIRMED",
+      "confidence": 0.6,
+      "affected_feature": "Resume Generation & Management",
+      "affected_nodes": [
+        "EXT-0001"
+      ],
+      "description": "The application instantiates vendor-specific AI client SDKs directly in business handlers rather than using a model gateway or provider-agnostic interface.",
+      "observed_behavior": "Switching model providers (e.g. OpenAI -> Anthropic -> Gemini) requires modifying core route controllers.",
+      "expected_behavior": "Encapsulate AI generation behind an abstract `LLMProvider` interface.",
+      "evidence_ids": [
+        "EV-00029"
+      ],
+      "root_cause": "Lack of adapter / gateway pattern around LLM calls.",
+      "recommendation": "Implement an `LLMService` abstraction separating prompt templates, provider configuration, and response parsing.",
+      "reproduction_steps": [
+        "1. Inspect resume generation controller",
+        "2. Note direct SDK import `import openai` without gateway wrapper."
+      ],
+      "adversarial_verdict": "CONFIRM"
+    }
+  ],
+  "elapsed_seconds": 0.057
+}

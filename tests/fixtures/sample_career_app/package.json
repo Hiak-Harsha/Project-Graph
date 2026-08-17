@@ -1,0 +1,15 @@
+{
+  "name": "career-graph-app",
+  "version": "1.0.0",
+  "description": "Career Graph & Resume AI web application",
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "axios": "^1.6.0",
+    "openai": "^4.20.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.0",
+    "vite": "^5.0.0"
+  }
+}
