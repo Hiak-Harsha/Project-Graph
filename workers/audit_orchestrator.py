@@ -134,7 +134,7 @@ def run_full_audit(repo_path: str | Path) -> tuple[ProjectGraph, EvidenceStore, 
     graph.metadata["reproducibility"] = repro_manifest.to_dict()
 
     # 12. Production 5-State Certification & 7-Gate Evaluation
-    verdict_engine = VerdictEngine(graph)
+    verdict_engine = VerdictEngine(graph, evidence_store=evidence_store)
     verdict = verdict_engine.compute_verdict()
     repro_manifest.certification_state = verdict["certification_state"]
     graph.metadata["reproducibility"]["certification_state"] = verdict["certification_state"]

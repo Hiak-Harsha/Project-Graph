@@ -26,8 +26,9 @@ class CertificationState(str, Enum):
 
 
 class VerdictEngine:
-    def __init__(self, graph: ProjectGraph) -> None:
+    def __init__(self, graph: ProjectGraph, evidence_store: Optional[Any] = None) -> None:
         self.graph = graph
+        self.evidence_store = evidence_store
 
     def compute_verdict(self) -> dict[str, Any]:
         findings = list(self.graph.findings.values())
@@ -113,16 +114,27 @@ class VerdictEngine:
 
         # Gate 5: Evidence Provenance & Cryptographic Backing
         confirmed_findings = [f for f in findings if f.status == "CONFIRMED"]
-        unbacked_findings = [f.id for f in confirmed_findings if not f.evidence_ids]
-        
-        # Verify that all confirmed findings have non-empty SHA-256 evidence records
-        g5_pass = (len(unbacked_findings) == 0) and (len(findings) == 0 or len(confirmed_findings) > 0)
+        invalid_evidence_findings: list[str] = []
+
+        for f in confirmed_findings:
+            if not f.evidence_ids:
+                invalid_evidence_findings.append(f"{f.id} (No evidence IDs linked)")
+                continue
+            if self.evidence_store:
+                for ev_id in f.evidence_ids:
+                    rec = self.evidence_store.get(ev_id)
+                    if rec is None:
+                        invalid_evidence_findings.append(f"{f.id} (Evidence {ev_id} missing from vault)")
+                    elif not rec.sha256_hash or len(rec.sha256_hash) != 64:
+                        invalid_evidence_findings.append(f"{f.id} (Evidence {ev_id} missing valid 64-hex SHA-256)")
+
+        g5_pass = (len(invalid_evidence_findings) == 0) and (len(findings) == 0 or len(confirmed_findings) > 0)
         gates.append({
             "gate_id": "GATE-5-EVIDENCE-PROVENANCE",
             "name": "Evidence Provenance Invariant Gate",
             "description": "Every confirmed finding must be backed by verified SHA-256 evidence records.",
             "passed": g5_pass,
-            "details": "All findings backed by verified SHA-256 evidence records." if g5_pass else f"Unbacked findings discovered: {', '.join(unbacked_findings)}.",
+            "details": "All findings backed by verified SHA-256 evidence records." if g5_pass else f"Unbacked findings discovered: {', '.join(invalid_evidence_findings)}.",
         })
 
         # Gate 6: Explicit Requirement Traceability
@@ -139,15 +151,16 @@ class VerdictEngine:
         # Gate 7: Deterministic Reproducibility Bundle
         repro_data = self.graph.metadata.get("reproducibility", {})
         has_revision = bool(repro_data.get("revision_id") or repro_data.get("commit_sha"))
-        has_merkle = bool(repro_data.get("file_inventory_hash"))
-        has_replay = bool(repro_data.get("replay_token"))
-        # Strict rule: Missing reproducibility data FAILS Gate 7
+        has_merkle = bool(repro_data.get("file_inventory_hash")) and len(repro_data.get("file_inventory_hash", "")) == 64
+        has_replay = bool(repro_data.get("replay_token")) and len(repro_data.get("replay_token", "")) == 64
+        
+        # Strict rule: Missing or malformed reproducibility data FAILS Gate 7
         g7_pass = bool(repro_data) and has_revision and has_merkle and has_replay
         
         merkle_digest = repro_data.get("file_inventory_hash", "")[:16] if has_merkle else ""
         rev_type = repro_data.get("revision_type", "REVISION")
         g7_details = (
-            f"Deterministic Merkle hash: {merkle_digest} ({rev_type}: {repro_data.get('revision_id', '')[:8]})."
+            f"Deterministic Merkle hash: {merkle_digest} ({rev_type}: {repro_data.get('revision_id', repro_data.get('commit_sha', ''))[:8]})."
             if g7_pass
             else "Missing or incomplete audit reproducibility metadata."
         )

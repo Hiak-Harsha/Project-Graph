@@ -31,7 +31,14 @@ from packages.discovery import (
     discover_ui_elements,
     fingerprint_project,
 )
-from packages.evidence import EvidenceStore, EvidenceType, ReproducibilityEngine, reset_evidence_counter
+from packages.evidence import (
+    EvidenceStore,
+    EvidenceType,
+    EvidenceValidationStatus,
+    EvidenceValidator,
+    ReproducibilityEngine,
+    reset_evidence_counter,
+)
 from packages.intelligence import (
     CertificationState,
     CompletenessEngine,
@@ -41,7 +48,7 @@ from packages.intelligence import (
 from packages.orchestration import AgentOutput, AgentProposal, AgentRegistry
 from packages.project_graph.models import CheckStatus, NodeType, reset_id_counters
 from packages.project_graph.store import ProjectGraph
-from packages.sandbox import RuntimeBootstrapEngine
+from packages.sandbox import ExecutionTarget, RuntimeBootstrapEngine, RuntimePlanner, RuntimePolicy
 from packages.sandbox.container_runtime import CommandResult, DockerSandboxSupervisor, RuntimeContract
 from packages.verification import (
     IdentityFixtureManager,
@@ -372,6 +379,52 @@ class TestAuditorPlatform(unittest.TestCase):
         self.assertIsNotNone(g1)
         self.assertFalse(g1["passed"])
         self.assertEqual(verdict["certification_state"], CertificationState.PARTIALLY_AUDITED.value)
+
+    def test_evidence_validator_cryptographic_checks(self):
+        """Verify EvidenceValidator enforces 64-hex SHA-256 hashes and complete provenance."""
+        store = EvidenceStore()
+        ev = store.add(
+            evidence_type=EvidenceType.STATIC_ANALYSIS,
+            target_id="NODE-001",
+            summary="Valid test evidence record",
+            payload={"key": "value"},
+        )
+
+        val_res = EvidenceValidator.validate_record(ev)
+        self.assertTrue(val_res.is_valid)
+        self.assertEqual(val_res.status, EvidenceValidationStatus.VALID)
+
+        # Test empty hash rejection
+        ev_empty = store.add(
+            evidence_type=EvidenceType.STATIC_ANALYSIS,
+            target_id="NODE-002",
+            summary="Empty hash record",
+        )
+        ev_empty.sha256_hash = ""
+        val_empty = EvidenceValidator.validate_record(ev_empty)
+        self.assertFalse(val_empty.is_valid)
+        self.assertEqual(val_empty.status, EvidenceValidationStatus.MISSING_HASH)
+
+        # Test missing record
+        val_none = EvidenceValidator.validate_record(None)
+        self.assertFalse(val_none.is_valid)
+        self.assertEqual(val_none.status, EvidenceValidationStatus.MISSING_RECORD)
+
+    def test_runtime_planner_policy_validation(self):
+        """Verify RuntimePlanner validates candidates against RuntimePolicy."""
+        planner = RuntimePlanner(FIXTURE_PATH)
+        candidate = planner.bootstrap.detect_candidate()
+        self.assertIsNotNone(candidate)
+
+        is_valid, reason = planner.policy.validate_candidate(candidate)
+        self.assertTrue(is_valid)
+        self.assertIn("validated", reason)
+
+        # Test rejection of unapproved frameworks
+        strict_policy = RuntimePolicy(allowed_frameworks={"Django"})
+        is_strict_valid, strict_reason = strict_policy.validate_candidate(candidate)
+        self.assertFalse(is_strict_valid)
+        self.assertIn("not approved", strict_reason)
 
 
 if __name__ == "__main__":

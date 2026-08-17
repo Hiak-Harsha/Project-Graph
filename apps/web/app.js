@@ -32,6 +32,10 @@ function initTabs() {
         renderProjectGraph(GRAPH_DATA);
       } else if (btn.dataset.tab === 'checks') {
         renderChecks();
+      } else if (btn.dataset.tab === 'gates') {
+        renderGates(AUDIT_DATA?.verdict?.production_gates || []);
+      } else if (btn.dataset.tab === 'flows') {
+        renderFlows(AUDIT_DATA?.user_flows || []);
       }
     });
   });
@@ -61,13 +65,13 @@ function initModal() {
 
 async function fetchAuditData() {
   try {
-    const res = await fetch('/api/audits/latest');
+    const res = await fetch('/api/audits/latest', { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to fetch audit');
     AUDIT_DATA = await res.json();
     populateDashboard(AUDIT_DATA);
 
     // Also fetch graph
-    const graphRes = await fetch('/api/audits/graph');
+    const graphRes = await fetch('/api/audits/graph', { cache: 'no-store' });
     if (graphRes.ok) {
       GRAPH_DATA = await graphRes.json();
     }
@@ -92,7 +96,7 @@ async function reAudit() {
     AUDIT_DATA = await res.json();
     populateDashboard(AUDIT_DATA);
 
-    const graphRes = await fetch('/api/audits/graph');
+    const graphRes = await fetch('/api/audits/graph', { cache: 'no-store' });
     if (graphRes.ok) {
       GRAPH_DATA = await graphRes.json();
       renderProjectGraph(GRAPH_DATA);
@@ -106,51 +110,63 @@ async function reAudit() {
 }
 
 function populateDashboard(data) {
-  const v = data.verdict;
-  const c = data.completeness;
-  const prod = data.product_understanding;
+  const v = data.verdict || {};
+  const c = data.completeness || {};
+  const prod = data.product_understanding || {};
+  const repro = data.reproducibility || {};
 
-  document.getElementById('overall-score').textContent = v.overall_score;
-  document.getElementById('verdict-pill').textContent = v.verdict_status;
-  document.getElementById('verdict-pill').className = `status-pill status-${v.status_badge.toLowerCase()}`;
+  document.getElementById('overall-score').textContent = v.overall_score || '—';
+  document.getElementById('verdict-pill').textContent = v.verdict_status || 'EVALUATING';
+  document.getElementById('verdict-pill').className = `status-pill status-${(v.status_badge || 'unverified').toLowerCase()}`;
 
-  document.getElementById('product-archetype').textContent = prod.product_archetype;
-  document.getElementById('p1-status').textContent = `PASS (${c.terminal_entities + c.unverified_entities}/${c.discovered_entities})`;
-  document.getElementById('coverage-pct').textContent = `${c.audit_coverage_pct}%`;
-  document.getElementById('exec-time').textContent = `${data.elapsed_seconds}s`;
+  document.getElementById('product-archetype').textContent = prod.product_archetype || 'Audited System';
+  document.getElementById('verdict-desc').textContent = v.summary_statement || 'Audit complete.';
+
+  document.getElementById('p1-status').textContent = `PASS (${(c.terminal_entities || 0) + (c.unverified_entities || 0)}/${c.discovered_entities || 0})`;
+  document.getElementById('static-cov-pct').textContent = `${c.static_coverage_pct || 0.0}%`;
+  document.getElementById('runtime-cov-pct').textContent = `${c.runtime_coverage_pct || 0.0}%`;
+  
+  const revDigest = repro.revision_id ? `${repro.revision_type || 'REV'}: ${repro.revision_id.slice(0, 10)}` : '—';
+  document.getElementById('revision-digest').textContent = revDigest;
+
+  const repoName = data.repo_path ? data.repo_path.split(/[\\/]/).pop() : 'sample_career_app';
+  document.getElementById('repo-name').textContent = repoName;
 
   // Domain scores
-  const scores = v.domain_scores;
-  setDomainScore('security', scores.Security);
-  setDomainScore('ux', scores['User Experience (UX)']);
-  setDomainScore('req', scores['Product Requirements']);
-  setDomainScore('arch', scores.Architecture);
+  const scores = v.domain_scores || {};
+  setDomainScore('security', scores.Security || 0);
+  setDomainScore('ux', scores['User Experience (UX)'] || 0);
+  setDomainScore('req', scores['Product Requirements'] || 0);
+  setDomainScore('arch', scores.Architecture || 0);
 
   // Tab counts
-  document.getElementById('tab-findings-count').textContent = data.findings.length;
-  document.getElementById('tab-tasks-count').textContent = data.verification_stats.total_tasks;
-  document.getElementById('tab-evidence-count').textContent = data.evidence_records.length;
+  document.getElementById('tab-findings-count').textContent = (data.findings || []).length;
+  document.getElementById('tab-gates-count').textContent = (v.production_gates || []).length || 7;
+  document.getElementById('tab-flows-count').textContent = (data.user_flows || []).length;
+  document.getElementById('tab-evidence-count').textContent = (data.evidence_records || []).length;
 
   // Filter badge counts
-  const fSummary = v.findings_summary;
+  const fSummary = v.findings_summary || { critical: 0, high: 0, medium: 0, low: 0 };
   document.getElementById('count-crit').textContent = fSummary.critical;
   document.getElementById('count-high').textContent = fSummary.high;
   document.getElementById('count-med').textContent = fSummary.medium;
   document.getElementById('count-low').textContent = fSummary.low;
 
-  renderFindings(data.findings);
+  renderFindings(data.findings || []);
+  renderGates(v.production_gates || []);
+  renderFlows(data.user_flows || []);
   renderChecks();
-  renderTasks();
-  renderEvidence(data.evidence_records);
-  renderCoverage(c.by_category);
+  renderEvidence(data.evidence_records || []);
+  renderCoverage(c.by_category || {});
 }
 
 function setDomainScore(id, score) {
   const el = document.getElementById(`score-${id}`);
   const bar = document.getElementById(`bar-${id}`);
   if (el && bar) {
-    el.textContent = score;
+    el.textContent = score.toFixed(1);
     bar.style.width = `${Math.min(100, score * 10)}%`;
+    bar.className = `domain-fill ${score >= 8 ? 'fill-success' : (score >= 5 ? 'fill-warning' : 'fill-danger')}`;
   }
 }
 
@@ -202,6 +218,54 @@ function renderFindings(findings) {
   });
 }
 
+function renderGates(gates) {
+  const tbody = document.getElementById('gates-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!gates || gates.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4">No gates evaluation available.</td></tr>';
+    return;
+  }
+
+  gates.forEach(g => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(g.gate_id)}</td>
+      <td style="font-weight: 600;">${escapeHtml(g.name)}</td>
+      <td><span class="status-pill status-${g.passed ? 'passed' : 'failed'}">${g.passed ? 'PASSED' : 'FAILED'}</span></td>
+      <td style="color: var(--text-main); font-size: 0.9rem;">${escapeHtml(g.details || g.description)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderFlows(flows) {
+  const tbody = document.getElementById('flows-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!flows || flows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4">No graph-derived user flows discovered.</td></tr>';
+    return;
+  }
+
+  flows.forEach(flow => {
+    const tr = document.createElement('tr');
+    const statusClass = flow.overall_status === 'VERIFIED' ? 'passed' : (flow.overall_status === 'FAILED' ? 'failed' : 'unverified');
+    const stepsHtml = (flow.steps || []).map(s => {
+      const sClass = s.status === 'STATICALLY_SUPPORTED' ? 'statically-supported' : s.status.toLowerCase();
+      return `<span class="step-badge step-${sClass}">Step ${s.step_number}: ${escapeHtml(s.step_name)} [${s.status}]</span>`;
+    }).join(' ');
+
+    tr.innerHTML = `
+      <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(flow.flow_id)}</td>
+      <td style="font-weight: 600;">${escapeHtml(flow.flow_name)}</td>
+      <td><span class="status-pill status-${statusClass}">${escapeHtml(flow.overall_status)}</span></td>
+      <td><div class="flow-steps-container">${stepsHtml}</div></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
 function showFindingModal(f) {
   const modal = document.getElementById('modal-content');
   modal.innerHTML = `
@@ -246,7 +310,7 @@ async function renderChecks() {
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6">Loading check obligations...</td></tr>';
   try {
-    const res = await fetch('/api/audits/checks');
+    const res = await fetch('/api/audits/checks', { cache: 'no-store' });
     const checks = await res.json();
     const countEl = document.getElementById('tab-checks-count');
     if (countEl) countEl.innerText = checks.length;
@@ -270,35 +334,13 @@ async function renderChecks() {
   }
 }
 
-async function renderTasks() {
-  const tbody = document.getElementById('tasks-tbody');
-  tbody.innerHTML = '<tr><td colspan="5">Loading tasks...</td></tr>';
-  try {
-    const res = await fetch('/api/audits/tasks');
-    const tasks = await res.json();
-    const countEl = document.getElementById('tab-tasks-count');
-    if (countEl) countEl.innerText = tasks.length;
-
-    tbody.innerHTML = '';
-    tasks.forEach(t => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td style="font-family: var(--font-mono);">${escapeHtml(t.id)}</td>
-        <td>${escapeHtml(t.task_type)}</td>
-        <td style="font-family: var(--font-mono); color: var(--accent);">${escapeHtml(t.target_id)}</td>
-        <td>${escapeHtml((t.required_checks || []).slice(0, 3).join(', '))}...</td>
-        <td><span class="status-pill status-${t.status === 'COMPLETED' ? 'passed' : 'failed'}">${escapeHtml(t.status)}</span></td>
-      `;
-      tbody.appendChild(tr);
-    });
-  } catch (e) {
-    console.error(e);
-  }
-}
-
 function renderEvidence(records) {
   const tbody = document.getElementById('evidence-tbody');
   tbody.innerHTML = '';
+  if (!records || records.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6">No evidence records captured.</td></tr>';
+    return;
+  }
   records.forEach(e => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -316,7 +358,10 @@ function renderEvidence(records) {
 function renderCoverage(byCat) {
   const tbody = document.getElementById('coverage-tbody');
   tbody.innerHTML = '';
-  if (!byCat) return;
+  if (!byCat || Object.keys(byCat).length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6">Loading completeness matrix...</td></tr>';
+    return;
+  }
 
   Object.entries(byCat).forEach(([type, data]) => {
     const tr = document.createElement('tr');
@@ -350,12 +395,10 @@ function renderProjectGraph(graph) {
     PACKAGE: '#a855f7',
   };
 
-  // Filter main interesting nodes for clean visual topology
   const interestingTypes = new Set(['REQUIREMENT', 'FEATURE', 'UI_ELEMENT', 'API_ENDPOINT', 'DATABASE_ENTITY', 'TEST']);
   const visibleNodes = graph.nodes.filter(n => interestingTypes.has(n.node_type));
   const nodeMap = new Map();
 
-  // Position nodes in columns by type
   const columns = {
     REQUIREMENT: { x: width * 0.12, nodes: [] },
     FEATURE: { x: width * 0.28, nodes: [] },
@@ -423,7 +466,17 @@ function renderProjectGraph(graph) {
     g.appendChild(text);
 
     g.addEventListener('click', () => {
-      alert(`Node ID: ${n.id}\nType: ${n.node_type}\nName: ${n.name}\nAudit Status: ${n.audit_status}`);
+      showFindingModal({
+        title: `Node: ${n.name}`,
+        severity: n.audit_status === 'FAILED' ? 'HIGH' : 'INFORMATIONAL',
+        category: n.node_type,
+        observed_behavior: `Audit Status: ${n.audit_status}\nStatic: ${n.static_status}\nRuntime: ${n.runtime_status}`,
+        expected_behavior: 'Node requirements and check obligations fulfilled.',
+        reproduction_steps: [`Inspect node declaration in project graph`, `Run check obligations for target ${n.id}`],
+        recommendation: 'Ensure all associated checks pass verification.',
+        evidence_ids: [],
+        confidence: 1.0,
+      });
     });
 
     svg.appendChild(g);
