@@ -100,7 +100,7 @@ class VerificationRunner:
             )
             node.static_status = AuditStatus.VERIFIED
             node.runtime_status = AuditStatus.UNVERIFIED
-            node.audit_status = AuditStatus.VERIFIED
+            node.refresh_audit_status()
 
             if task_id in self.graph.audit_tasks:
                 task = self.graph.audit_tasks[task_id]
@@ -122,7 +122,7 @@ class VerificationRunner:
 
             ext.static_status = AuditStatus.VERIFIED if timeout_check_passed else AuditStatus.FAILED
             ext.runtime_status = AuditStatus.UNVERIFIED
-            ext.audit_status = AuditStatus.VERIFIED if timeout_check_passed else AuditStatus.FAILED
+            ext.refresh_audit_status()
 
             if task_id in self.graph.audit_tasks:
                 task = self.graph.audit_tasks[task_id]
@@ -143,7 +143,7 @@ class VerificationRunner:
             # Files and packages discovered via AST are statically proven, but runtime-unexercised
             n.static_status = AuditStatus.VERIFIED
             n.runtime_status = AuditStatus.UNVERIFIED
-            n.audit_status = AuditStatus.VERIFIED
+            n.refresh_audit_status()
 
         # 7. Check Features & Requirements Traceability
         for feat in self.graph.nodes_of_type(NodeType.FEATURE):
@@ -155,7 +155,7 @@ class VerificationRunner:
             feat_status = AuditStatus.FAILED if has_failed_children else AuditStatus.VERIFIED
             feat.static_status = feat_status
             feat.runtime_status = AuditStatus.UNVERIFIED
-            feat.audit_status = feat_status
+            feat.refresh_audit_status()
 
             checks = self.graph.get_checks_for_target(feat.id)
             trace_check = next((c for c in checks if "TRACEABILITY" in c.id), None)
@@ -175,11 +175,10 @@ class VerificationRunner:
             implementers = [self.graph.get_node(e.source) for e in edges_in if self.graph.get_node(e.source)]
             if not implementers or any(i.audit_status == AuditStatus.FAILED for i in implementers):
                 req.static_status = AuditStatus.FAILED
-                req.audit_status = AuditStatus.FAILED
             else:
                 req.static_status = AuditStatus.VERIFIED
-                req.audit_status = AuditStatus.VERIFIED
             req.runtime_status = AuditStatus.UNVERIFIED
+            req.refresh_audit_status()
 
         elapsed = time.time() - t0
         return {

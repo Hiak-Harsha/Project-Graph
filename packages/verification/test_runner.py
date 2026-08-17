@@ -132,7 +132,7 @@ class TestRunnerVerifier:
 
             node.static_status = AuditStatus.FAILED if has_weak_tests else AuditStatus.VERIFIED
             node.runtime_status = AuditStatus.VERIFIED if passed else AuditStatus.FAILED
-            node.audit_status = AuditStatus.VERIFIED if (passed and not has_weak_tests) else AuditStatus.FAILED
+            node.refresh_audit_status()
 
             return node.audit_status, {"passed": passed, "duration": duration, "weak_assertions": weak_assertions}, evidence_ids
 

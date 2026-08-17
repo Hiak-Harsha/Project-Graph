@@ -140,6 +140,6 @@ class UIVerifier:
         node.static_status = AuditStatus.VERIFIED
         node.runtime_status = AuditStatus.UNVERIFIED
         node.unverified_reasons = ["Runtime click verification unexecuted (browser offline)."]
-        node.audit_status = AuditStatus.VERIFIED
+        node.refresh_audit_status()
 
         return node.audit_status, checks_result, evidence_ids

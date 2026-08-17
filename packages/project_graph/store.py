@@ -60,6 +60,10 @@ class ProjectGraph:
         if node_id in self.nodes:
             self.nodes[node_id].audit_status = status
 
+    def recompute_all_audit_statuses(self) -> None:
+        for node in self.nodes.values():
+            node.refresh_audit_status()
+
     # -- queries --------------------------------------------------------
     def get_node(self, node_id: str) -> Optional[GraphNode]:
         return self.nodes.get(node_id)
@@ -224,7 +228,17 @@ class ProjectGraph:
                     required INTEGER,
                     evidence_ids TEXT,
                     details TEXT,
-                    unverified_reason TEXT
+                    unverified_reason TEXT,
+                    execution_method TEXT,
+                    preconditions TEXT,
+                    inputs TEXT,
+                    expected_observations TEXT,
+                    success_conditions TEXT,
+                    failure_conditions TEXT,
+                    evidence_requirements TEXT,
+                    timeout INTEGER,
+                    risk_level TEXT,
+                    destructive INTEGER
                 );
                 CREATE TABLE evidence_records (
                     id TEXT PRIMARY KEY,
@@ -304,7 +318,7 @@ class ProjectGraph:
                 ],
             )
             conn.executemany(
-                "INSERT INTO audit_checks VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO audit_checks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     (
                         c.id,
@@ -317,6 +331,16 @@ class ProjectGraph:
                         json.dumps(c.evidence_ids),
                         json.dumps(c.details),
                         c.unverified_reason,
+                        c.execution_method,
+                        json.dumps(c.preconditions),
+                        json.dumps(c.inputs),
+                        json.dumps(c.expected_observations),
+                        json.dumps(c.success_conditions),
+                        json.dumps(c.failure_conditions),
+                        json.dumps(c.evidence_requirements),
+                        c.timeout,
+                        c.risk_level,
+                        int(c.destructive),
                     )
                     for c in self.audit_checks.values()
                 ],

@@ -81,8 +81,12 @@ class ExecutionTier(str, Enum):
 
 
 class CheckStatus(str, Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
     PASSED = "PASSED"
     FAILED = "FAILED"
+    ERROR = "ERROR"
+    BLOCKED = "BLOCKED"
     UNVERIFIED = "UNVERIFIED"
     NOT_APPLICABLE = "N_A"
     SKIPPED = "SKIPPED"
@@ -100,6 +104,16 @@ class AuditCheck:
     evidence_ids: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
     unverified_reason: Optional[str] = None
+    execution_method: str = "STATIC"
+    preconditions: list[str] = field(default_factory=list)
+    inputs: dict[str, Any] = field(default_factory=dict)
+    expected_observations: list[str] = field(default_factory=list)
+    success_conditions: list[str] = field(default_factory=list)
+    failure_conditions: list[str] = field(default_factory=list)
+    evidence_requirements: list[str] = field(default_factory=list)
+    timeout: Optional[int] = None
+    risk_level: str = "MEDIUM"
+    destructive: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -150,6 +164,23 @@ class GraphNode:
     runtime_status: AuditStatus = AuditStatus.UNVERIFIED
     checks: list[str] = field(default_factory=list)
     unverified_reasons: list[str] = field(default_factory=list)
+
+    def derive_audit_status(self) -> AuditStatus:
+        if self.static_status == AuditStatus.FAILED or self.runtime_status == AuditStatus.FAILED:
+            return AuditStatus.FAILED
+        if self.static_status == AuditStatus.UNVERIFIED or self.runtime_status == AuditStatus.UNVERIFIED:
+            return AuditStatus.UNVERIFIED
+        if self.static_status == AuditStatus.NOT_APPLICABLE and self.runtime_status == AuditStatus.NOT_APPLICABLE:
+            return AuditStatus.NOT_APPLICABLE
+        if self.static_status == AuditStatus.VERIFIED and self.runtime_status in (AuditStatus.VERIFIED, AuditStatus.NOT_APPLICABLE):
+            return AuditStatus.VERIFIED
+        if self.static_status == AuditStatus.NOT_APPLICABLE and self.runtime_status == AuditStatus.VERIFIED:
+            return AuditStatus.VERIFIED
+        return AuditStatus.UNVERIFIED
+
+    def refresh_audit_status(self) -> AuditStatus:
+        self.audit_status = self.derive_audit_status()
+        return self.audit_status
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

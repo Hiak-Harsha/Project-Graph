@@ -83,7 +83,13 @@ class APIRunnerVerifier:
 
         has_auth_hint = meta.get("auth_hint_nearby", False)
         if auth_dec_check:
-            auth_dec_check.status = CheckStatus.PASSED if has_auth_hint else CheckStatus.PASSED
+            if has_auth_hint:
+                auth_dec_check.status = CheckStatus.PASSED
+                auth_dec_check.details["auth_requirement"] = "AUTH_REQUIRED"
+            else:
+                auth_dec_check.status = CheckStatus.UNVERIFIED
+                auth_dec_check.details["auth_requirement"] = "UNKNOWN"
+                auth_dec_check.unverified_reason = "Authentication requirement is not explicitly encoded; endpoint may be public or protected by framework defaults."
 
         is_parameterized = "{" in route_path or ":" in route_path
         if is_parameterized and bola_static_check:
@@ -161,7 +167,7 @@ class APIRunnerVerifier:
 
         node.static_status = AuditStatus.FAILED if (is_parameterized and bola_static_check and bola_static_check.status == CheckStatus.FAILED) else AuditStatus.VERIFIED
         node.runtime_status = AuditStatus.FAILED if (bola_runtime_check and bola_runtime_check.status == CheckStatus.FAILED) else (AuditStatus.VERIFIED if http_exec_check and http_exec_check.status == CheckStatus.PASSED else AuditStatus.UNVERIFIED)
-        node.audit_status = AuditStatus.FAILED if (node.static_status == AuditStatus.FAILED or node.runtime_status == AuditStatus.FAILED) else (AuditStatus.VERIFIED if node.runtime_status == AuditStatus.VERIFIED else AuditStatus.UNVERIFIED)
+        node.refresh_audit_status()
 
         return node.audit_status, {}, evidence_ids
 
