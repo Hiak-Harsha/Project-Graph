@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import time
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 from packages.evidence.store import EvidenceStore
@@ -38,34 +40,101 @@ class ReproducibilityEngine:
     def __init__(self, evidence_store: EvidenceStore) -> None:
         self.evidence_store = evidence_store
 
+    def resolve_git_commit_sha(self, repo_path: Path) -> str:
+        """Resolve actual 40-character Git commit SHA if in a git repository."""
+        # 1. Try git subprocess
+        try:
+            res = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                sha = res.stdout.strip()
+                if len(sha) == 40 and all(c in "0123456789abcdefABCDEF" for c in sha):
+                    return sha
+        except Exception:
+            pass
+
+        # 2. Try parsing .git directory directly
+        git_dir = repo_path / ".git"
+        if git_dir.exists() and git_dir.is_dir():
+            head_file = git_dir / "HEAD"
+            if head_file.exists():
+                try:
+                    head_content = head_file.read_text(encoding="utf-8").strip()
+                    if head_content.startswith("ref: "):
+                        ref_path = git_dir / head_content.replace("ref: ", "").strip()
+                        if ref_path.exists():
+                            sha = ref_path.read_text(encoding="utf-8").strip()
+                            if len(sha) == 40:
+                                return sha
+                    elif len(head_content) == 40:
+                        return head_content
+                except Exception:
+                    pass
+
+        # Fallback: Hash repo tree
+        return self.compute_file_inventory_merkle_hash(repo_path)[:40]
+
+    def compute_file_inventory_merkle_hash(self, repo_path: Path) -> str:
+        """Compute deterministic Merkle SHA-256 across all sorted files in repo."""
+        hasher = hashlib.sha256()
+        try:
+            for file_path in sorted(repo_path.rglob("*")):
+                if any(p in (".git", "__pycache__", "node_modules", ".pytest_cache") for p in file_path.parts):
+                    continue
+                if file_path.is_file():
+                    rel = str(file_path.relative_to(repo_path)).replace("\\", "/")
+                    size = file_path.stat().st_size
+                    try:
+                        content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+                    except Exception:
+                        content_hash = "UNREADABLE"
+                    hasher.update(f"{rel}:{size}:{content_hash}\n".encode("utf-8"))
+        except Exception:
+            hasher.update(str(repo_path).encode("utf-8"))
+
+        return hasher.hexdigest()
+
     def generate_manifest(
         self,
         audit_id: str,
-        repo_path: str,
-        commit_sha: str = "HEAD",
+        repo_path: str | Path,
+        commit_sha: str | None = None,
         certification_state: str = "NOT_PRODUCTION_READY",
         runtime_contract_payload: str = "",
     ) -> AuditReproducibilityManifest:
+        repo_p = Path(repo_path).resolve()
+
+        # Real Commit SHA resolution
+        actual_commit_sha = commit_sha if (commit_sha and commit_sha != "HEAD") else self.resolve_git_commit_sha(repo_p)
+
+        # Real Merkle Inventory Hash
+        inventory_hash = self.compute_file_inventory_merkle_hash(repo_p)
+
         # Compute evidence vault digest
         all_ev = self.evidence_store.all()
         hasher = hashlib.sha256()
-        for ev in all_ev:
+        for ev in sorted(all_ev, key=lambda e: e.id):
             hasher.update(f"{ev.id}:{ev.evidence_type.value}:{ev.sha256_hash}".encode("utf-8"))
         vault_digest = hasher.hexdigest()
 
         # Contract hash
         contract_hash = hashlib.sha256(runtime_contract_payload.encode("utf-8")).hexdigest() if runtime_contract_payload else "NO_CONTRACT"
 
-        # Replay token
-        replay_raw = f"{audit_id}:{commit_sha}:{vault_digest}:{contract_hash}:{certification_state}"
+        # Deterministic Replay Token
+        replay_raw = f"{audit_id}:{actual_commit_sha}:{inventory_hash}:{vault_digest}:{contract_hash}:{certification_state}"
         replay_token = hashlib.sha256(replay_raw.encode("utf-8")).hexdigest()
 
         return AuditReproducibilityManifest(
             audit_id=audit_id,
             timestamp_iso=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            commit_sha=commit_sha,
-            target_repo_path=str(repo_path),
-            file_inventory_hash=hashlib.sha256(str(repo_path).encode("utf-8")).hexdigest()[:16],
+            commit_sha=actual_commit_sha,
+            target_repo_path=str(repo_p),
+            file_inventory_hash=inventory_hash,
             runtime_contract_hash=contract_hash[:16],
             evidence_vault_digest=vault_digest,
             certification_state=certification_state,

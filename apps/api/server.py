@@ -36,12 +36,23 @@ def ensure_audit_run():
 FORBIDDEN_SYSTEM_PATHS = {
     "/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin",
     "c:\\", "c:\\windows", "c:\\program files", "c:\\program files (x86)", "c:\\users",
+    "c:/", "c:/windows", "c:/program files", "c:/program files (x86)", "c:/users",
 }
 
 
 def validate_safe_repo_path(raw_path: str) -> tuple[bool, Optional[Path], str]:
     if not raw_path:
         return True, FIXTURE_DEFAULT_REPO, ""
+
+    clean_raw = str(raw_path).strip().lower().replace("/", "\\")
+    clean_posix = str(raw_path).strip().lower().replace("\\", "/")
+
+    # Cross-platform check before resolve()
+    if clean_posix in ("/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin") or \
+       clean_posix.startswith(("/etc/", "/proc/", "/sys/", "/dev/", "/root/")) or \
+       clean_raw in ("c:\\", "c:", "c:\\windows", "c:\\users", "c:\\program files") or \
+       clean_raw.startswith(("c:\\windows", "c:\\users\\", "\\\\", "..")):
+        return False, None, "Access to root or system directory is blocked for security."
 
     try:
         resolved = Path(raw_path).resolve()

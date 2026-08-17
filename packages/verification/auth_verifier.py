@@ -67,31 +67,32 @@ class AuthVerifier:
                 )
 
                 if not has_ownership_check:
-                    # CONFIRMED BOLA / IDOR VULNERABILITY
+                    # CONFIRMED BOLA / IDOR STATIC DEFECT
                     ev = self.evidence_store.add(
-                        evidence_type=EvidenceType.AUTH_BOUNDARY_TEST,
+                        evidence_type=EvidenceType.STATIC_ANALYSIS,
                         target_id=node.id,
-                        summary=f"Broken Object-Level Authorization (BOLA / IDOR) on '{node.name}'.",
+                        summary=f"Static Authorization Analysis: Missing Ownership/Tenancy check on '{node.name}'.",
                         source_location=f"{file_rel}:{line_no}",
                         payload={
                             "endpoint": node.name,
                             "resource_identifier": m.group(0),
                             "file": file_rel,
                             "line": line_no,
-                            "observed_flaw": "Endpoint queries record by ID without asserting ownership against the authenticated session.",
+                            "observed_flaw": "Endpoint queries record by ID without asserting ownership against authenticated session in source AST.",
                             "attack_scenario": "User A can supply User B's resource ID and access/modify private records.",
                             "severity": "CRITICAL",
+                            "analysis_tier": "STATIC_AST",
                         },
                     )
                     node.audit_status = AuditStatus.FAILED
                     results.append((node, AuditStatus.FAILED, [ev.id]))
                 else:
                     ev = self.evidence_store.add(
-                        evidence_type=EvidenceType.AUTH_BOUNDARY_TEST,
+                        evidence_type=EvidenceType.STATIC_ANALYSIS,
                         target_id=node.id,
-                        summary=f"Authorization boundary verified on '{node.name}': ownership check detected.",
+                        summary=f"Static Authorization Analysis on '{node.name}': ownership check pattern detected.",
                         source_location=f"{file_rel}:{line_no}",
-                        payload={"endpoint": node.name, "ownership_enforced": True},
+                        payload={"endpoint": node.name, "ownership_enforced": True, "analysis_tier": "STATIC_AST"},
                     )
                     results.append((node, AuditStatus.VERIFIED, [ev.id]))
 

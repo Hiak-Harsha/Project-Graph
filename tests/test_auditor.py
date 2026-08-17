@@ -300,7 +300,7 @@ class TestAuditorPlatform(unittest.TestCase):
         self.assertGreater(len(report.discrepancies), 0)
 
     def test_user_flow_engine_breakage_detection(self):
-        """Verify user flow engine identifies multi-step journey and pinpoints dead step."""
+        """Verify dynamic graph-driven user flow engine discovers journeys and detects broken steps."""
         graph = ProjectGraph()
         discover_ui_elements(FIXTURE_PATH, graph)
         discover_api_endpoints(FIXTURE_PATH, graph)
@@ -308,10 +308,12 @@ class TestAuditorPlatform(unittest.TestCase):
         flow_engine = UserFlowEngine(graph)
         flows = flow_engine.discover_and_audit_flows()
 
-        self.assertEqual(len(flows), 1)
-        self.assertEqual(flows[0].flow_id, "FLOW-001")
-        self.assertEqual(flows[0].broken_step, 4)
-        self.assertEqual(flows[0].overall_status.value, "FAILED")
+        self.assertGreaterEqual(len(flows), 1)
+        export_flow = next((f for f in flows if "Export Resume" in f.flow_name or any("Export Resume" in s.step_name for s in f.steps)), None)
+        self.assertIsNotNone(export_flow)
+        self.assertEqual(export_flow.overall_status.value, "FAILED")
+        self.assertEqual(export_flow.broken_step, 2)
+        self.assertIn("no execution handler", export_flow.breakage_reason)
 
     def test_reproducibility_manifest_generation(self):
         """Verify tamper-evident audit manifest with SHA-256 tokens."""

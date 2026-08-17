@@ -1,8 +1,14 @@
 """
-Verification Runner (spec Milestone 2 §1-3 / P3 / P4)
+Verification Runner Orchestrator (spec Milestone 2 §1-13)
 
-Executes generated AuditTasks deterministically using specialized verifiers,
-updates node terminal AuditStatuses, and populates the EvidenceStore.
+Orchestrates all deterministic verification passes:
+1. Static UI verification & Dead element detection
+2. Playwright Browser execution (if sandbox is available & contract configured)
+3. API Endpoint verification (AST Route & Auth checks + dynamic HTTP runner)
+4. Database Entity verification (Schema model & static constraints)
+5. Test Suite verification (AST assertion strength & runner isolation)
+6. External Service timeout policy enforcement
+7. Feature & Requirement traceability graph traversal
 """
 from __future__ import annotations
 
@@ -10,15 +16,10 @@ import time
 from pathlib import Path
 
 from packages.evidence import EvidenceStore, EvidenceType
-from packages.project_graph.models import (
-    AuditCheck,
-    AuditStatus,
-    CheckStatus,
-    ExecutionTier,
-    NodeType,
-)
+from packages.project_graph.models import AuditStatus, CheckStatus, NodeType
 from packages.project_graph.store import ProjectGraph
-from packages.sandbox import DockerSandboxSupervisor
+from packages.sandbox.container_runtime import DockerSandboxSupervisor, RuntimeContract
+
 from .api_runner import APIRunnerVerifier
 from .browser_lab import BrowserLaboratory
 from .test_runner import TestRunnerVerifier
@@ -30,6 +31,8 @@ class VerificationRunner:
         self.root = root
         self.graph = graph
         self.evidence_store = evidence_store
+
+        # Verification Adapters
         self.ui_verifier = UIVerifier(root, evidence_store, graph)
         self.api_runner = APIRunnerVerifier(root, evidence_store, graph)
         self.test_runner = TestRunnerVerifier(root, evidence_store, graph)
@@ -41,26 +44,25 @@ class VerificationRunner:
         tasks_completed = 0
         tasks_failed = 0
 
-        # 0. Start the only permitted runtime target. No target repository is
-        # imported or launched on the control-plane host.
-        sandbox_execution = self.sandbox.start(self.root)
+        # Attempt to load runtime contract for container startup
+        contract = RuntimeContract.load_from_repo(self.root)
+        sandbox_execution = self.sandbox.start(self.root, contract)
         sandbox_ev = self.evidence_store.add(
-            EvidenceType.SANDBOX_EXECUTION, "SANDBOX-RUNTIME",
-            f"Sandbox execution {sandbox_execution.execution_id}: {sandbox_execution.status}.",
-            payload=sandbox_execution.to_dict(), execution_id=sandbox_execution.execution_id, producer="DockerSandboxSupervisor",
+            evidence_type=EvidenceType.SANDBOX_EXECUTION,
+            target_id="SANDBOX",
+            summary=f"Docker sandbox lifecycle status: {sandbox_execution.status}.",
+            source_location=str(self.root / "Dockerfile") if (self.root / "Dockerfile").exists() else None,
+            payload=sandbox_execution.to_dict(),
         )
-        if sandbox_execution.status == "HEALTHY":
-            self.api_runner.configure_sandbox_target(sandbox_execution.base_url, sandbox_execution.execution_id)
 
-        # 1. Verify UI Elements (Static Handler + Incomplete States + Browser Gap)
+        # 1. Verify UI Elements (Static Handlers & State Controls)
         ui_nodes = self.graph.nodes_of_type(NodeType.UI_ELEMENT)
-        for node in ui_nodes:
+        ui_results = self.ui_verifier.verify_elements(ui_nodes)
+        for node, status, ev_ids in ui_results:
             task_id = f"TASK-{node.id}"
-            status, checks, ev_ids = self.ui_verifier.verify_ui_element(node)
             if task_id in self.graph.audit_tasks:
                 task = self.graph.audit_tasks[task_id]
                 task.status = "COMPLETED" if status == AuditStatus.VERIFIED else "FAILED"
-                task.results = checks
                 task.evidence_ids = ev_ids
                 if status == AuditStatus.VERIFIED:
                     tasks_completed += 1
@@ -69,7 +71,10 @@ class VerificationRunner:
 
         # 1b. Browser flows run after static UI checks so browser evidence can
         # update the same click/network obligations rather than be overwritten.
-        browser_report = self.browser_lab.run_browser_audit(sandbox_execution.base_url if sandbox_execution.status == "HEALTHY" else None, sandbox_execution.execution_id)
+        browser_report = self.browser_lab.run_browser_audit(
+            sandbox_execution.base_url if sandbox_execution.status == "HEALTHY" else None,
+            sandbox_execution.execution_id,
+        )
 
         # 2. Verify API Endpoints (Static Route & Auth + Dynamic HTTP Dispatch & BOLA)
         api_nodes = self.graph.nodes_of_type(NodeType.API_ENDPOINT)
@@ -111,11 +116,11 @@ class VerificationRunner:
                 schema_check.status = CheckStatus.PASSED
 
             ev = self.evidence_store.add(
-                evidence_type=EvidenceType.DATABASE_OBSERVATION,
+                evidence_type=EvidenceType.STATIC_ANALYSIS,
                 target_id=node.id,
-                summary=f"Database entity '{node.name}' schema model and constraints statically parsed.",
+                summary=f"Static AST Analysis: Database entity '{node.name}' schema model and constraints parsed.",
                 source_location=f"{node.metadata.get('file', '')}:{node.metadata.get('line', 1)}",
-                payload={"model": node.name, "orm": node.metadata.get("orm")},
+                payload={"model": node.name, "orm": node.metadata.get("orm"), "analysis_tier": "STATIC_AST"},
             )
             node.static_status = AuditStatus.VERIFIED
             node.runtime_status = AuditStatus.NOT_APPLICABLE
@@ -150,7 +155,7 @@ class VerificationRunner:
                 else:
                     tasks_failed += 1
 
-        # 6. Verify Files, Modules, Packages, Functions, Classes (Static Inventory Proven)
+        # 6. Verify Files, Modules, Packages, Functions, Classes (Static Inventory Discovered)
         for n in (
             self.graph.nodes_of_type(NodeType.FILE)
             + self.graph.nodes_of_type(NodeType.PACKAGE)
@@ -159,7 +164,12 @@ class VerificationRunner:
             + self.graph.nodes_of_type(NodeType.CLASS)
         ):
             n_checks = self.graph.get_checks_for_target(n.id)
-            n.static_status = AuditStatus.VERIFIED
+            if n_checks:
+                all_passed = all(c.status == CheckStatus.PASSED for c in n_checks)
+                any_failed = any(c.status == CheckStatus.FAILED for c in n_checks)
+                n.static_status = AuditStatus.FAILED if any_failed else (AuditStatus.VERIFIED if all_passed else AuditStatus.UNVERIFIED)
+            else:
+                n.static_status = AuditStatus.UNVERIFIED
             n.runtime_status = AuditStatus.NOT_APPLICABLE
             n.refresh_audit_status(n_checks)
 

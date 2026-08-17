@@ -20,10 +20,14 @@ from packages.sandbox.environment import detect_environment_capabilities
 
 
 class BrowserLaboratory:
-    def __init__(self, root: Path, evidence_store: EvidenceStore, graph: ProjectGraph) -> None:
+    def __init__(self, root: Path, arg2: Any = None, arg3: Any = None) -> None:
         self.root = root
-        self.evidence_store = evidence_store
-        self.graph = graph
+        if isinstance(arg2, EvidenceStore):
+            self.evidence_store = arg2
+            self.graph = arg3
+        else:
+            self.graph = arg2
+            self.evidence_store = arg3
         self.caps = detect_environment_capabilities()
 
     def run_browser_audit(self, base_url: Optional[str] = None, execution_id: Optional[str] = None) -> dict[str, Any]:

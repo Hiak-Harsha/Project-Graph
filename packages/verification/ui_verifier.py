@@ -63,9 +63,6 @@ class UIVerifier:
             if handler_check:
                 handler_check.status = CheckStatus.FAILED
             if click_check:
-                # The static handler proof establishes the dead-control finding,
-                # but no browser click occurred. A runtime-tier check therefore
-                # remains blocked rather than being presented as a runtime fail.
                 click_check.status = CheckStatus.BLOCKED
                 click_check.unverified_reason = "Static analysis found no executable handler; no browser click was performed."
 
@@ -146,3 +143,10 @@ class UIVerifier:
         node.refresh_audit_status(checks)
 
         return node.audit_status, checks_result, evidence_ids
+
+    def verify_elements(self, nodes: list[GraphNode]) -> list[tuple[GraphNode, AuditStatus, list[str]]]:
+        results = []
+        for node in nodes:
+            status, _, ev_ids = self.verify_ui_element(node)
+            results.append((node, status, ev_ids))
+        return results

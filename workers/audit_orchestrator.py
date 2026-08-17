@@ -123,19 +123,21 @@ def run_full_audit(repo_path: str | Path) -> tuple[ProjectGraph, EvidenceStore, 
     completeness_engine = CompletenessEngine(graph)
     coverage_report = completeness_engine.evaluate_coverage()
 
-    # 11. Production 5-State Certification & 7-Gate Evaluation
-    verdict_engine = VerdictEngine(graph)
-    verdict = verdict_engine.compute_verdict()
-
-    # 12. Reproducibility Manifest
+    # 11. Reproducibility Manifest & Merkle Hashing
     repro_engine = ReproducibilityEngine(evidence_store)
     repro_manifest = repro_engine.generate_manifest(
         audit_id=f"AUDIT-{int(time.time())}",
         repo_path=str(repo_path),
-        commit_sha="HEAD",
-        certification_state=verdict["certification_state"],
+        certification_state="EVALUATING",
         runtime_contract_payload=json.dumps(candidate_contract.to_runtime_contract()) if candidate_contract else "",
     )
+    graph.metadata["reproducibility"] = repro_manifest.to_dict()
+
+    # 12. Production 5-State Certification & 7-Gate Evaluation
+    verdict_engine = VerdictEngine(graph)
+    verdict = verdict_engine.compute_verdict()
+    repro_manifest.certification_state = verdict["certification_state"]
+    graph.metadata["reproducibility"]["certification_state"] = verdict["certification_state"]
 
     elapsed = round(time.time() - t0, 3)
 

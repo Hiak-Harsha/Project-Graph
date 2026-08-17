@@ -61,6 +61,9 @@ class EdgeRelationship(str, Enum):
     SUBMITS_TO = "SUBMITS_TO"
 
 
+EdgeType = EdgeRelationship
+
+
 class EvidenceLevel(str, Enum):
     DIRECT_STATIC = "DIRECT_STATIC"
     STATIC_DATAFLOW = "STATIC_DATAFLOW"

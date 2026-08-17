@@ -1,17 +1,18 @@
 """
-User Flow & State-Machine Verification Engine (spec Milestone 2 §12)
+Dynamic Graph-Driven User Flow & State-Machine Engine (spec Milestone 2 §12)
 
-Audits end-to-end user journeys across routes, components, and state transitions:
-- Discovers sequential user flows (e.g. Signup -> Login -> Dashboard -> Generate Resume -> Export)
-- Verifies state machine transitions (IDLE -> SUBMITTING -> SUCCESS / ERROR / TIMEOUT)
-- Validates side-effect persistence (UI confirmation vs Database mutation)
+Synthesizes and audits end-to-end user journeys purely from Project Graph topology:
+PAGE -> UI_ELEMENT -> (HANDLED_BY / SUBMITS_TO) -> API_ENDPOINT -> (WRITES_TO / READS_FROM) -> DATABASE_ENTITY
+
+Contains ZERO hardcoded benchmark strings or domain assumptions.
 """
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
-from packages.project_graph.models import AuditStatus, GraphNode, NodeType
+from packages.project_graph.models import AuditStatus, CheckStatus, EdgeType, GraphNode, NodeType
 from packages.project_graph.store import ProjectGraph
 
 
@@ -20,10 +21,12 @@ class FlowStep:
     step_number: int
     step_name: str
     target_node_id: str
-    action_type: str  # NAVIGATE | INPUT | CLICK_SUBMIT | API_DISPATCH | DB_WRITE
+    target_node_type: str
+    action_type: str  # NAVIGATE | UI_INTERACTION | API_DISPATCH | DB_PERSISTENCE
     expected_state: str
     observed_state: str = "UNVERIFIED"
     status: str = "UNVERIFIED"
+    failure_detail: str = ""
 
 
 @dataclass
@@ -49,63 +52,117 @@ class UserFlowEngine:
 
     def discover_and_audit_flows(self) -> list[UserFlowAudit]:
         flows: list[UserFlowAudit] = []
+        ui_nodes = self.graph.nodes_of_type(NodeType.UI_ELEMENT)
+        api_nodes = {n.id: n for n in self.graph.nodes_of_type(NodeType.API_ENDPOINT)}
 
-        # 1. Resume Lifecycle Flow (Primary Benchmark User Journey)
-        ui_nodes = {n.name: n for n in self.graph.nodes_of_type(NodeType.UI_ELEMENT)}
-        api_nodes = {n.name: n for n in self.graph.nodes_of_type(NodeType.API_ENDPOINT)}
+        flow_idx = 1
 
-        flow_steps = [
-            FlowStep(
-                step_number=1,
-                step_name="Access Dashboard",
-                target_node_id="PAGE-DASHBOARD",
-                action_type="NAVIGATE",
-                expected_state="DASHBOARD_RENDERED",
-                observed_state="STATIC_PROVEN",
-                status="PASSED",
-            ),
-            FlowStep(
-                step_number=2,
-                step_name="Submit Resume Generator Form",
-                target_node_id=ui_nodes.get("BUTTON: Generate Resume", GraphNode(id="UI-GEN", name="BUTTON: Generate Resume", node_type=NodeType.UI_ELEMENT)).id,
-                action_type="CLICK_SUBMIT",
-                expected_state="GENERATING_SPINNER",
-                observed_state="STATIC_PROVEN",
-                status="PASSED",
-            ),
-            FlowStep(
-                step_number=3,
-                step_name="Dispatch Resume Generation API",
-                target_node_id=api_nodes.get("POST /api/resume/generate", GraphNode(id="API-GEN", name="POST /api/resume/generate", node_type=NodeType.API_ENDPOINT)).id,
-                action_type="API_DISPATCH",
-                expected_state="HTTP_200_SUCCESS",
-                observed_state="STATIC_PROVEN",
-                status="PASSED",
-            ),
-            FlowStep(
-                step_number=4,
-                step_name="Export PDF / Download",
-                target_node_id=ui_nodes.get("BUTTON: Export Resume", GraphNode(id="UI-EXPORT", name="BUTTON: Export Resume", node_type=NodeType.UI_ELEMENT)).id,
-                action_type="CLICK_SUBMIT",
-                expected_state="DOWNLOAD_DISPATCHED",
-                observed_state="DEAD_HANDLER_DETECTED",
-                status="FAILED",
-            ),
-        ]
+        for ui_node in ui_nodes:
+            # Check if this UI element is an actionable trigger (button, form submit, interactive link)
+            is_actionable = ui_node.metadata.get("element_type") in ("BUTTON", "FORM", "LINK") or "button" in ui_node.name.lower()
+            if not is_actionable:
+                continue
 
-        # Audit flow integrity
-        broken_step = next((s.step_number for s in flow_steps if s.status == "FAILED"), None)
-        overall_status = AuditStatus.FAILED if broken_step is not None else AuditStatus.VERIFIED
+            steps: list[FlowStep] = []
+            step_num = 1
 
-        resume_flow = UserFlowAudit(
-            flow_id="FLOW-001",
-            flow_name="Resume Generation & Export Journey",
-            description="End-to-end user journey from dashboard access to resume generation and export.",
-            steps=flow_steps,
-            overall_status=overall_status,
-            broken_step=broken_step,
-            breakage_reason="Step 4 failed: Actionable control 'BUTTON: Export Resume' has no attached onClick handler in DeadButtonComponent.tsx" if broken_step == 4 else "",
-        )
-        flows.append(resume_flow)
+            # Step 1: Render Enclosing Component / Page
+            file_rel = ui_node.metadata.get("file", "unknown")
+            steps.append(
+                FlowStep(
+                    step_number=step_num,
+                    step_name=f"Render Container '{Path(file_rel).name}'",
+                    target_node_id=ui_node.id,
+                    target_node_type="UI_ELEMENT",
+                    action_type="NAVIGATE",
+                    expected_state="COMPONENT_MOUNTED",
+                    observed_state="STATIC_DISCOVERED",
+                    status="PASSED",
+                )
+            )
+            step_num += 1
+
+            # Step 2: Trigger UI Control Interaction
+            ui_checks = self.graph.get_checks_for_target(ui_node.id)
+            dead_check = next((c for c in ui_checks if "DEAD" in c.id or "HANDLER" in c.id), None)
+            has_handler = ui_node.metadata.get("has_handler", True)
+
+            ui_step_failed = (dead_check and dead_check.status == CheckStatus.FAILED) or not has_handler
+            steps.append(
+                FlowStep(
+                    step_number=step_num,
+                    step_name=f"Trigger Control '{ui_node.name}'",
+                    target_node_id=ui_node.id,
+                    target_node_type="UI_ELEMENT",
+                    action_type="UI_INTERACTION",
+                    expected_state="HANDLER_EXECUTED",
+                    observed_state="DEAD_HANDLER_DETECTED" if ui_step_failed else "HANDLER_ATTACHED",
+                    status="FAILED" if ui_step_failed else "PASSED",
+                    failure_detail=f"Actionable control '{ui_node.name}' has no execution handler in {file_rel}" if ui_step_failed else "",
+                )
+            )
+            step_num += 1
+
+            # Step 3: Trace Outbound API Invocations
+            out_edges = self.graph.edges_from(ui_node.id)
+            connected_apis: list[GraphNode] = []
+            for edge in out_edges:
+                if edge.target in api_nodes:
+                    connected_apis.append(api_nodes[edge.target])
+
+            for api in connected_apis:
+                api_checks = self.graph.get_checks_for_target(api.id)
+                api_failed = any(c.status == CheckStatus.FAILED for c in api_checks)
+                steps.append(
+                    FlowStep(
+                        step_number=step_num,
+                        step_name=f"Dispatch API Request '{api.name}'",
+                        target_node_id=api.id,
+                        target_node_type="API_ENDPOINT",
+                        action_type="API_DISPATCH",
+                        expected_state="HTTP_200_SUCCESS",
+                        observed_state="ENDPOINT_STATIC_REGISTERED",
+                        status="FAILED" if api_failed else "PASSED",
+                        failure_detail=f"API endpoint '{api.name}' failed verification checks." if api_failed else "",
+                    )
+                )
+                step_num += 1
+
+                # Step 4: Trace Database Persistence
+                db_edges = self.graph.edges_from(api.id)
+                for db_edge in db_edges:
+                    db_node = self.graph.get_node(db_edge.target)
+                    if db_node and db_node.node_type == NodeType.DATABASE_ENTITY:
+                        steps.append(
+                            FlowStep(
+                                step_number=step_num,
+                                step_name=f"Mutate Database Entity '{db_node.name}'",
+                                target_node_id=db_node.id,
+                                target_node_type="DATABASE_ENTITY",
+                                action_type="DB_PERSISTENCE",
+                                expected_state="DB_RECORD_PERSISTED",
+                                observed_state="STATIC_SCHEMA_DISCOVERED",
+                                status="PASSED",
+                            )
+                        )
+                        step_num += 1
+
+            # Determine overall flow health
+            broken_step = next((s.step_number for s in steps if s.status == "FAILED"), None)
+            overall_status = AuditStatus.FAILED if broken_step is not None else AuditStatus.VERIFIED
+            fail_step = next((s for s in steps if s.step_number == broken_step), None) if broken_step else None
+
+            clean_flow_name = ui_node.name.replace("BUTTON:", "").replace("LINK:", "").replace("FORM:", "").strip()
+            flow = UserFlowAudit(
+                flow_id=f"FLOW-{flow_idx:04d}",
+                flow_name=f"User Journey: {clean_flow_name}",
+                description=f"Automated graph-derived user journey for '{ui_node.name}' declared in {file_rel}.",
+                steps=steps,
+                overall_status=overall_status,
+                broken_step=broken_step,
+                breakage_reason=fail_step.failure_detail if fail_step else "",
+            )
+            flows.append(flow)
+            flow_idx += 1
 
         return flows

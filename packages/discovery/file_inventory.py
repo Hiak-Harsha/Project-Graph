@@ -33,7 +33,21 @@ IGNORE_DIRS = {
     "etc",
 }
 
-MAX_FILE_LIMIT = 5000
+EXCLUSION_POLICIES = {
+    ".git": "Version control metadata (audited via Git commit/ref resolution)",
+    "node_modules": "Generated external package tree (audited via package.json manifest)",
+    "__pycache__": "Compiled Python bytecode cache (ignored for source analysis)",
+    ".venv": "Local virtual environment (audited via requirements/pyproject manifest)",
+    "venv": "Local virtual environment (audited via requirements/pyproject manifest)",
+    "dist": "Build artifacts output directory",
+    "build": "Build intermediate output directory",
+    ".next": "Next.js compilation output directory",
+    ".pytest_cache": "Test runner temporary cache",
+    ".mypy_cache": "Type checker cache",
+    ".gemini": "Agent temporary worktree",
+}
+
+MAX_FILE_LIMIT = 10000
 
 
 def _hash_file(path: Path) -> str:
@@ -55,12 +69,21 @@ def _loc(path: Path) -> int | None:
 
 def discover_files(root: Path, graph: ProjectGraph) -> list[GraphNode]:
     discovered: list[GraphNode] = []
+    skipped_count = 0
+    encountered_exclusions = set()
+
     for path in sorted(root.rglob("*")):
-        if len(discovered) >= MAX_FILE_LIMIT:
-            break
         if not path.is_file():
             continue
-        if any(part in IGNORE_DIRS for part in path.parts):
+
+        # Check exclusion policies
+        matching_exclusion = next((part for part in path.parts if part in IGNORE_DIRS), None)
+        if matching_exclusion:
+            encountered_exclusions.add(matching_exclusion)
+            continue
+
+        if len(discovered) >= MAX_FILE_LIMIT:
+            skipped_count += 1
             continue
 
         rel_path = str(path.relative_to(root)).replace("\\", "/")
@@ -112,4 +135,19 @@ def discover_files(root: Path, graph: ProjectGraph) -> list[GraphNode]:
         )
         graph.add_node(node)
         discovered.append(node)
+
+    # Record explicit discovery universe accounting
+    if not isinstance(graph.metadata, dict):
+        graph.metadata = {}
+    graph.metadata["file_discovery_universe"] = {
+        "files_discovered": len(discovered),
+        "files_skipped_due_to_limit": skipped_count,
+        "discovery_truncated": skipped_count > 0,
+        "max_limit": MAX_FILE_LIMIT,
+        "excluded_directories": [
+            {"directory": d, "policy": EXCLUSION_POLICIES.get(d, "System/binary ignored path")}
+            for d in sorted(encountered_exclusions)
+        ],
+    }
+
     return discovered

@@ -123,17 +123,20 @@ class ProjectGraph:
         check_coverage_pct = round((resolved_checks / total_checks * 100), 1) if total_checks > 0 else 0.0
 
         # 3. Multi-Tier Breakdown (Static AST vs Runtime Dynamic)
-        static_checks = [c for c in self.audit_checks.values() if c.execution_tier in (ExecutionTier.STATIC_AST, ExecutionTier.STATIC_PATTERN)]
-        runtime_checks = [c for c in self.audit_checks.values() if c.execution_tier in (ExecutionTier.TEST_RUNNER, ExecutionTier.RUNTIME_HTTP, ExecutionTier.RUNTIME_BROWSER)]
+        static_checks = [c for c in self.audit_checks.values() if c.execution_tier in (ExecutionTier.STATIC_AST, ExecutionTier.STATIC_PATTERN, ExecutionTier.STATIC_GRAPH)]
+        runtime_checks = [c for c in self.audit_checks.values() if c.execution_tier in (ExecutionTier.TEST_RUNNER, ExecutionTier.RUNTIME_HTTP, ExecutionTier.RUNTIME_BROWSER, ExecutionTier.RUNTIME_TEST)]
 
         static_total = len(static_checks)
+        static_executed = sum(1 for c in static_checks if c.status in (CheckStatus.PASSED, CheckStatus.FAILED, CheckStatus.ERROR))
         static_passed = sum(1 for c in static_checks if c.status == CheckStatus.PASSED)
-        static_coverage = round((static_passed / static_total * 100), 1) if static_total > 0 else 0.0
+        static_coverage = round((static_executed / static_total * 100), 1) if static_total > 0 else 0.0
+        static_pass_rate = round((static_passed / static_executed * 100), 1) if static_executed > 0 else 0.0
 
         runtime_total = len(runtime_checks)
+        runtime_executed = sum(1 for c in runtime_checks if c.status in (CheckStatus.PASSED, CheckStatus.FAILED, CheckStatus.ERROR))
         runtime_passed = sum(1 for c in runtime_checks if c.status == CheckStatus.PASSED)
-        runtime_executed = sum(1 for c in runtime_checks if c.status in (CheckStatus.PASSED, CheckStatus.FAILED))
         runtime_coverage = round((runtime_executed / runtime_total * 100), 1) if runtime_total > 0 else 0.0
+        runtime_pass_rate = round((runtime_passed / runtime_executed * 100), 1) if runtime_executed > 0 else 0.0
 
         return {
             # Entity dimensions
@@ -156,12 +159,15 @@ class ProjectGraph:
             "check_coverage_pct": check_coverage_pct,
             # Multi-tier verification breakdown
             "static_obligations_total": static_total,
+            "static_obligations_executed": static_executed,
             "static_obligations_passed": static_passed,
             "static_coverage_pct": static_coverage,
+            "static_pass_rate_pct": static_pass_rate,
             "runtime_obligations_total": runtime_total,
             "runtime_obligations_executed": runtime_executed,
             "runtime_obligations_passed": runtime_passed,
             "runtime_coverage_pct": runtime_coverage,
+            "runtime_pass_rate_pct": runtime_pass_rate,
             # Invariants
             "complete_accounting": (resolved_checks + unverified_checks + blocked_checks + error_checks + pending_checks) == total_checks and (terminal_entities + unverified_entities) == discovered_entities,
             "audit_fully_resolved": (unverified_checks + blocked_checks + error_checks + pending_checks) == 0 and unverified_entities == 0 and total_checks > 0,
@@ -181,21 +187,16 @@ class ProjectGraph:
             "completeness": self.completeness_report(),
         }
 
-    def persist(self, db_path: str | Path, evidence_store: Optional[Any] = None) -> None:
-        db_path = Path(db_path)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path)
+    def persist(self, sqlite_path: Path, evidence_store: Any = None) -> None:
+        sqlite_path = Path(sqlite_path)
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+
+        conn = sqlite3.connect(sqlite_path)
         try:
+            conn.execute("PRAGMA journal_mode=WAL;")
             conn.executescript(
                 """
-                DROP TABLE IF EXISTS graph_nodes;
-                DROP TABLE IF EXISTS graph_edges;
-                DROP TABLE IF EXISTS audit_tasks;
-                DROP TABLE IF EXISTS audit_checks;
-                DROP TABLE IF EXISTS evidence_records;
-                DROP TABLE IF EXISTS findings;
-
-                CREATE TABLE graph_nodes (
+                CREATE TABLE IF NOT EXISTS graph_nodes (
                     id TEXT PRIMARY KEY,
                     node_type TEXT,
                     name TEXT,
@@ -205,7 +206,7 @@ class ProjectGraph:
                     runtime_status TEXT,
                     checks TEXT
                 );
-                CREATE TABLE graph_edges (
+                CREATE TABLE IF NOT EXISTS graph_edges (
                     source TEXT,
                     relationship TEXT,
                     target TEXT,
@@ -215,7 +216,7 @@ class ProjectGraph:
                     evidence_level TEXT,
                     metadata TEXT
                 );
-                CREATE TABLE audit_tasks (
+                CREATE TABLE IF NOT EXISTS audit_tasks (
                     id TEXT PRIMARY KEY,
                     task_type TEXT,
                     target_id TEXT,
@@ -225,7 +226,7 @@ class ProjectGraph:
                     results TEXT,
                     evidence_ids TEXT
                 );
-                CREATE TABLE audit_checks (
+                CREATE TABLE IF NOT EXISTS audit_checks (
                     id TEXT PRIMARY KEY,
                     target_id TEXT,
                     name TEXT,
@@ -247,7 +248,7 @@ class ProjectGraph:
                     risk_level TEXT,
                     destructive INTEGER
                 );
-                CREATE TABLE evidence_records (
+                CREATE TABLE IF NOT EXISTS evidence_records (
                     id TEXT PRIMARY KEY,
                     evidence_type TEXT,
                     target_id TEXT,
@@ -255,9 +256,16 @@ class ProjectGraph:
                     source_location TEXT,
                     sha256_hash TEXT,
                     timestamp TEXT,
+                    execution_id TEXT,
+                    commit_sha TEXT,
+                    environment_id TEXT,
+                    tool_version TEXT,
+                    producer TEXT,
+                    artifact_uri TEXT,
+                    mime_type TEXT,
                     payload TEXT
                 );
-                CREATE TABLE findings (
+                CREATE TABLE IF NOT EXISTS findings (
                     id TEXT PRIMARY KEY,
                     title TEXT,
                     category TEXT,
@@ -277,8 +285,24 @@ class ProjectGraph:
                 );
                 """
             )
+            # Schema migration for existing SQLite databases
+            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(evidence_records)").fetchall()}
+            for col, col_type in [
+                ("execution_id", "TEXT"),
+                ("commit_sha", "TEXT"),
+                ("environment_id", "TEXT"),
+                ("tool_version", "TEXT"),
+                ("producer", "TEXT"),
+                ("artifact_uri", "TEXT"),
+                ("mime_type", "TEXT"),
+            ]:
+                if col not in existing_cols:
+                    try:
+                        conn.execute(f"ALTER TABLE evidence_records ADD COLUMN {col} {col_type}")
+                    except Exception:
+                        pass
             conn.executemany(
-                "INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO graph_nodes VALUES (?,?,?,?,?,?,?,?)",
                 [
                     (
                         n.id,
@@ -294,7 +318,7 @@ class ProjectGraph:
                 ],
             )
             conn.executemany(
-                "INSERT INTO graph_edges VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO graph_edges VALUES (?,?,?,?,?,?,?,?)",
                 [
                     (
                         e.source,
@@ -310,7 +334,7 @@ class ProjectGraph:
                 ],
             )
             conn.executemany(
-                "INSERT INTO audit_tasks VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO audit_tasks VALUES (?,?,?,?,?,?,?,?)",
                 [
                     (
                         t.id,
@@ -326,7 +350,7 @@ class ProjectGraph:
                 ],
             )
             conn.executemany(
-                "INSERT INTO audit_checks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO audit_checks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     (
                         c.id,
@@ -355,23 +379,30 @@ class ProjectGraph:
             )
             if evidence_store is not None:
                 conn.executemany(
-                    "INSERT INTO evidence_records VALUES (?,?,?,?,?,?,?,?)",
+                    "INSERT OR REPLACE INTO evidence_records VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     [
                         (
                             ev.id,
-                            ev.evidence_type.value if hasattr(ev.evidence_type, "value") else str(ev.evidence_type),
+                            ev.evidence_type.value,
                             ev.target_id,
                             ev.summary,
                             ev.source_location,
                             ev.sha256_hash,
                             ev.timestamp,
+                            getattr(ev, "execution_id", None),
+                            getattr(ev, "commit_sha", None),
+                            getattr(ev, "environment_id", None),
+                            getattr(ev, "tool_version", "2.0.0-truth"),
+                            getattr(ev, "producer", "project-graph-auditor"),
+                            getattr(ev, "artifact_uri", None),
+                            getattr(ev, "mime_type", "application/json"),
                             json.dumps(ev.payload),
                         )
                         for ev in evidence_store.all()
                     ],
                 )
             conn.executemany(
-                "INSERT INTO findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     (
                         f.id,

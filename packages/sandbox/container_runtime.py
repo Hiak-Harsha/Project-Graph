@@ -61,6 +61,20 @@ class RuntimeContract:
         contract.validate()
         return contract
 
+    @classmethod
+    def load_from_repo(cls, root: Path) -> Optional[RuntimeContract]:
+        for candidate_path in (
+            root / ".project-graph" / "runtime-contract.json",
+            root / "runtime-contract.json",
+        ):
+            if candidate_path.exists():
+                try:
+                    data = json.loads(candidate_path.read_text(encoding="utf-8"))
+                    return cls.from_dict(data)
+                except Exception:
+                    pass
+        return None
+
     def validate(self) -> None:
         if not 1 <= self.startup_timeout_seconds <= 300:
             raise ValueError("startup_timeout_seconds must be between 1 and 300.")
