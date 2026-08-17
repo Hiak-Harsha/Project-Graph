@@ -5,15 +5,24 @@
 let AUDIT_DATA = null;
 let GRAPH_DATA = null;
 let CURRENT_FILTER = 'all';
+let PROJECTS_LIST = [];
+let ACTIVE_PROJECT_ID = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initFilters();
   initModal();
-  fetchAuditData();
+  initIntakeModal();
+  loadProjects();
 
   document.getElementById('btn-re-audit')?.addEventListener('click', () => {
     reAudit();
+  });
+
+  document.getElementById('project-selector')?.addEventListener('change', (e) => {
+    if (e.target.value) {
+      selectProject(e.target.value);
+    }
   });
 });
 
@@ -63,6 +72,95 @@ function initModal() {
   });
 }
 
+function initIntakeModal() {
+  const intakeOverlay = document.getElementById('intake-modal-overlay');
+  const openBtn = document.getElementById('btn-new-audit');
+  const closeBtn = document.getElementById('intake-modal-close');
+  const cancelBtn = document.getElementById('btn-cancel-intake');
+  const intakeForm = document.getElementById('intake-form');
+
+  openBtn?.addEventListener('click', () => intakeOverlay.classList.add('active'));
+  closeBtn?.addEventListener('click', () => intakeOverlay.classList.remove('active'));
+  cancelBtn?.addEventListener('click', () => intakeOverlay.classList.remove('active'));
+  intakeOverlay?.addEventListener('click', (e) => {
+    if (e.target === intakeOverlay) intakeOverlay.classList.remove('active');
+  });
+
+  intakeForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('intake-name').value;
+    const sourceType = document.getElementById('intake-source-type').value;
+    const sourceLocation = document.getElementById('intake-path').value;
+
+    const submitBtn = document.getElementById('btn-submit-intake');
+    submitBtn.innerHTML = `<span>Ingesting & Auditing...</span>`;
+    submitBtn.disabled = true;
+
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name,
+          source_type: sourceType,
+          source_location: sourceLocation,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Intake failed');
+      }
+
+      const result = await res.json();
+      intakeOverlay.classList.remove('active');
+      intakeForm.reset();
+      await loadProjects(result.project?.project_id);
+    } catch (err) {
+      alert(`Intake Error: ${err.message}`);
+    } finally {
+      submitBtn.innerHTML = `Ingest & Launch Full Audit`;
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+async function loadProjects(selectProjectId = null) {
+  try {
+    const res = await fetch('/api/projects', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Failed to load projects');
+    PROJECTS_LIST = await res.json();
+
+    const selector = document.getElementById('project-selector');
+    if (selector) {
+      selector.innerHTML = '';
+      PROJECTS_LIST.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.project_id;
+        const prefix = p.is_benchmark ? ' [Benchmark]' : '';
+        opt.textContent = `${p.name}${prefix}`;
+        selector.appendChild(opt);
+      });
+
+      const targetId = selectProjectId || (PROJECTS_LIST.length > 0 ? PROJECTS_LIST[0].project_id : null);
+      if (targetId) {
+        selector.value = targetId;
+        ACTIVE_PROJECT_ID = targetId;
+      }
+    }
+
+    await fetchAuditData();
+  } catch (err) {
+    console.error('Error loading projects:', err);
+    await fetchAuditData();
+  }
+}
+
+async function selectProject(projectId) {
+  ACTIVE_PROJECT_ID = projectId;
+  await fetchAuditData();
+}
+
 async function fetchAuditData() {
   try {
     const res = await fetch('/api/audits/latest', { cache: 'no-store' });
@@ -70,7 +168,6 @@ async function fetchAuditData() {
     AUDIT_DATA = await res.json();
     populateDashboard(AUDIT_DATA);
 
-    // Also fetch graph
     const graphRes = await fetch('/api/audits/graph', { cache: 'no-store' });
     if (graphRes.ok) {
       GRAPH_DATA = await graphRes.json();
@@ -87,14 +184,14 @@ async function reAudit() {
   btn.disabled = true;
 
   try {
-    const res = await fetch('/api/audits/run', {
+    const endpoint = ACTIVE_PROJECT_ID ? `/api/projects/${ACTIVE_PROJECT_ID}/audits` : '/api/audits/run';
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
     if (!res.ok) throw new Error('Audit run failed');
-    AUDIT_DATA = await res.json();
-    populateDashboard(AUDIT_DATA);
+    await fetchAuditData();
 
     const graphRes = await fetch('/api/audits/graph', { cache: 'no-store' });
     if (graphRes.ok) {
@@ -122,15 +219,25 @@ function populateDashboard(data) {
   document.getElementById('product-archetype').textContent = prod.product_archetype || 'Audited System';
   document.getElementById('verdict-desc').textContent = v.summary_statement || 'Audit complete.';
 
+  // Check if active project is benchmark
+  const activePrj = PROJECTS_LIST.find(p => p.project_id === ACTIVE_PROJECT_ID);
+  const badgeEl = document.getElementById('project-type-badge');
+  if (badgeEl) {
+    if (activePrj && activePrj.is_benchmark) {
+      badgeEl.textContent = 'BENCHMARK SUITE';
+      badgeEl.className = 'cat-tag';
+    } else {
+      badgeEl.textContent = 'CUSTOM PROJECT AUDIT';
+      badgeEl.className = 'cat-tag';
+    }
+  }
+
   document.getElementById('p1-status').textContent = `PASS (${(c.terminal_entities || 0) + (c.unverified_entities || 0)}/${c.discovered_entities || 0})`;
   document.getElementById('static-cov-pct').textContent = `${c.static_coverage_pct || 0.0}%`;
   document.getElementById('runtime-cov-pct').textContent = `${c.runtime_coverage_pct || 0.0}%`;
   
   const revDigest = repro.revision_id ? `${repro.revision_type || 'REV'}: ${repro.revision_id.slice(0, 10)}` : '—';
   document.getElementById('revision-digest').textContent = revDigest;
-
-  const repoName = data.repo_path ? data.repo_path.split(/[\\/]/).pop() : 'sample_career_app';
-  document.getElementById('repo-name').textContent = repoName;
 
   // Domain scores
   const scores = v.domain_scores || {};

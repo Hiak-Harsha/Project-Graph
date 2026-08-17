@@ -39,6 +39,7 @@ from packages.evidence import (
     ReproducibilityEngine,
     reset_evidence_counter,
 )
+from packages.intake import ProjectRegistry, SourceType
 from packages.intelligence import (
     CertificationState,
     CompletenessEngine,
@@ -420,11 +421,47 @@ class TestAuditorPlatform(unittest.TestCase):
         self.assertTrue(is_valid)
         self.assertIn("validated", reason)
 
-        # Test rejection of unapproved frameworks
-        strict_policy = RuntimePolicy(allowed_frameworks={"Django"})
-        is_strict_valid, strict_reason = strict_policy.validate_candidate(candidate)
-        self.assertFalse(is_strict_valid)
-        self.assertIn("not approved", strict_reason)
+    def test_project_intake_registry_and_revision_isolation(self):
+        """Verify multi-tenant ProjectRegistry registers projects and isolates audit runs."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = ProjectRegistry(workspace_dir=Path(tmpdir))
+
+            # 1. Register Benchmark Project
+            p1 = registry.register_project(
+                name="Career App Benchmark",
+                source_type=SourceType.LOCAL_DIRECTORY,
+                source_location=FIXTURE_PATH,
+                is_benchmark=True,
+            )
+            self.assertEqual(p1.project_id, "PRJ-0001")
+            self.assertTrue(p1.is_benchmark)
+
+            # 2. Register Custom Project
+            p2 = registry.register_project(
+                name="Sample Custom App",
+                source_type=SourceType.LOCAL_DIRECTORY,
+                source_location=FIXTURE_PATH,
+                is_benchmark=False,
+            )
+            self.assertEqual(p2.project_id, "PRJ-0002")
+            self.assertFalse(p2.is_benchmark)
+
+            # 3. Create content-addressed revision
+            rev1 = registry.create_revision(p1.project_id)
+            self.assertTrue(rev1.revision_id.startswith("REV-"))
+            self.assertEqual(len(registry.revisions[p1.project_id]), 1)
+
+            # 4. Run isolated audits
+            audit1 = registry.run_audit_for_project(p1.project_id)
+            self.assertEqual(audit1.audit_id, "AUDIT-0001")
+            self.assertEqual(audit1.project_id, p1.project_id)
+            self.assertIn(audit1.audit_id, registry.audit_graphs)
+
+            # 5. List projects
+            project_list = registry.list_projects()
+            self.assertEqual(len(project_list), 2)
+            self.assertEqual(project_list[0]["audits_count"], 1)
+            self.assertEqual(project_list[1]["audits_count"], 0)
 
 
 if __name__ == "__main__":

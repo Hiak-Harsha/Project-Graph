@@ -26,15 +26,25 @@
       </div>
 
       <div class="header-actions">
-        <div class="repo-badge" id="repo-target-badge">
-          <span class="pulse-dot"></span>
-          <span id="repo-name">Loading target...</span>
+        <!-- Project Selector Dropdown -->
+        <div class="project-selector-wrapper">
+          <select id="project-selector" class="project-dropdown">
+            <option value="">Loading Projects...</option>
+          </select>
         </div>
+
+        <button class="btn btn-secondary" id="btn-new-audit">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          + New Audit
+        </button>
+
         <button class="btn btn-primary" id="btn-re-audit">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
           </svg>
-          Re-Audit Project
+          Re-Audit
         </button>
       </div>
     </header>
@@ -56,8 +66,11 @@
                 <span class="score-max">/ 10</span>
               </div>
               <div class="score-meta">
-                <h2 id="product-archetype">Analyzing Target Repository...</h2>
-                <p id="verdict-desc">Evaluating Project Graph topology, check obligations, and release gates.</p>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <h2 id="product-archetype" style="margin: 0;">Analyzing Target Repository...</h2>
+                  <span id="project-type-badge" class="cat-tag">BENCHMARK</span>
+                </div>
+                <p id="verdict-desc" style="margin-top: 6px;">Evaluating Project Graph topology, check obligations, and release gates.</p>
               </div>
             </div>
 
@@ -295,6 +308,42 @@
     <div class="modal-card glass-panel" id="modal-card">
       <button class="modal-close" id="modal-close">&times;</button>
       <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- Project Intake Modal -->
+  <div class="modal-overlay" id="intake-modal-overlay">
+    <div class="modal-card glass-panel" id="intake-modal-card">
+      <button class="modal-close" id="intake-modal-close">&times;</button>
+      <h2 style="font-size: 1.3rem; margin-bottom: 8px; color: #fff;">+ New Project Audit Intake</h2>
+      <p style="color: var(--text-dim); margin-bottom: 20px; font-size: 0.88rem;">
+        Register any software codebase (Local Folder or ZIP Archive) to run a complete AST discovery, check obligations, and release gate verification.
+      </p>
+
+      <form id="intake-form">
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">Project Name</label>
+          <input type="text" id="intake-name" placeholder="e.g. My E-commerce App" required style="width: 100%; padding: 10px 14px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-family: inherit;">
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">Source Type</label>
+          <select id="intake-source-type" style="width: 100%; padding: 10px 14px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-family: inherit;">
+            <option value="LOCAL_DIRECTORY">Local Project Directory Path</option>
+            <option value="ZIP_ARCHIVE">ZIP Archive File Path</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom: 24px;">
+          <label style="display: block; font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">Source Location (Absolute Path)</label>
+          <input type="text" id="intake-path" placeholder="e.g. C:\Users\madha\Desktop\my_project" required style="width: 100%; padding: 10px 14px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-family: inherit;">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px;">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-intake">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-intake">Ingest & Launch Full Audit</button>
+        </div>
+      </form>
     </div>
   </div>
 
