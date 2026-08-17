@@ -140,9 +140,9 @@ class VerificationRunner:
             + self.graph.nodes_of_type(NodeType.FUNCTION)
             + self.graph.nodes_of_type(NodeType.CLASS)
         ):
-            # Files and packages discovered via AST are statically proven, but runtime-unexercised
+            # Files and packages discovered via AST are statically proven; runtime tier is N/A
             n.static_status = AuditStatus.VERIFIED
-            n.runtime_status = AuditStatus.UNVERIFIED
+            n.runtime_status = AuditStatus.NOT_APPLICABLE
             n.refresh_audit_status()
 
         # 7. Check Features & Requirements Traceability
