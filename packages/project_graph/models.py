@@ -71,6 +71,43 @@ class FindingCategory(str, Enum):
     DATA_CONSISTENCY = "DATA_CONSISTENCY"
 
 
+class ExecutionTier(str, Enum):
+    STATIC_AST = "STATIC_AST"
+    STATIC_PATTERN = "STATIC_PATTERN"
+    TEST_RUNNER = "TEST_RUNNER"
+    RUNTIME_HTTP = "RUNTIME_HTTP"
+    RUNTIME_BROWSER = "RUNTIME_BROWSER"
+    MODEL_REASONING = "MODEL_REASONING"
+
+
+class CheckStatus(str, Enum):
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    UNVERIFIED = "UNVERIFIED"
+    NOT_APPLICABLE = "N_A"
+    SKIPPED = "SKIPPED"
+
+
+@dataclass
+class AuditCheck:
+    id: str
+    target_id: str
+    name: str
+    description: str
+    execution_tier: ExecutionTier
+    status: CheckStatus = CheckStatus.UNVERIFIED
+    required: bool = True
+    evidence_ids: list[str] = field(default_factory=list)
+    details: dict[str, Any] = field(default_factory=dict)
+    unverified_reason: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["execution_tier"] = self.execution_tier.value
+        d["status"] = self.status.value
+        return d
+
+
 # Monotonic per-type counters -> stable human-legible IDs (FILE-0001, UI-0092, ...)
 _counters: dict[str, itertools.count] = {}
 
@@ -109,11 +146,17 @@ class GraphNode:
     name: str
     metadata: dict[str, Any] = field(default_factory=dict)
     audit_status: AuditStatus = AuditStatus.UNVERIFIED
+    static_status: AuditStatus = AuditStatus.UNVERIFIED
+    runtime_status: AuditStatus = AuditStatus.UNVERIFIED
+    checks: list[str] = field(default_factory=list)
+    unverified_reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["node_type"] = self.node_type.value
         d["audit_status"] = self.audit_status.value
+        d["static_status"] = self.static_status.value
+        d["runtime_status"] = self.runtime_status.value
         return d
 
 

@@ -52,35 +52,38 @@ def discover_features_and_requirements(root: Path, graph: ProjectGraph) -> tuple
                     graph.add_node(req_node)
                     requirements.append(req_node)
 
-    # 2. Derive Features from API / UI naming clusters if few/no explicit features found
+    # 2. Derive Features from explicit requirements and match against codebase
     api_nodes = graph.nodes_of_type(NodeType.API_ENDPOINT)
     ui_nodes = graph.nodes_of_type(NodeType.UI_ELEMENT)
+    db_nodes = graph.nodes_of_type(NodeType.DATABASE_ENTITY)
 
-    # Cluster by keywords: Auth, Resume, Career Graph, Profile, Recommendation, Payment, User
     domain_keywords = {
-        "Authentication & Authorization": ["auth", "login", "signup", "logout", "token", "user"],
-        "Resume Generation & Management": ["resume", "cv", "export", "generate", "template"],
-        "Career Graph Visualization": ["graph", "career", "node", "path", "network"],
-        "Recommendations & Analytics": ["recommend", "analytic", "match", "score", "insight"],
-        "Profile & Account Settings": ["profile", "setting", "account", "preference"],
+        "User Authentication and Session Management": ["auth", "login", "signup", "logout", "token", "user", "session"],
+        "AI Resume Generation & Export": ["resume", "cv", "export", "generate", "template"],
+        "Career Graph Visualization": ["graph", "career", "pathway", "skill", "node", "network"],
+        "Job Recommendations & Analytics": ["recommend", "analytic", "job", "match", "insight"],
     }
 
     for feat_name, kws in domain_keywords.items():
         matched_apis = [a for a in api_nodes if any(kw in a.name.lower() or kw in a.metadata.get("path", "").lower() for kw in kws)]
         matched_uis = [u for u in ui_nodes if any(kw in u.name.lower() or kw in u.metadata.get("file", "").lower() for kw in kws)]
+        matched_dbs = [d for d in db_nodes if any(kw in d.name.lower() for kw in kws)]
 
-        if matched_apis or matched_uis:
-            f_node = GraphNode(
-                id=next_id(NodeType.FEATURE),
-                node_type=NodeType.FEATURE,
-                name=feat_name,
-                metadata={
-                    "matched_api_count": len(matched_apis),
-                    "matched_ui_count": len(matched_uis),
-                    "cluster_type": "DERIVED_FROM_CODEBASE",
-                },
-            )
-            graph.add_node(f_node)
-            features.append(f_node)
+        has_implementation = bool(matched_apis or matched_uis or matched_dbs)
+
+        f_node = GraphNode(
+            id=next_id(NodeType.FEATURE),
+            node_type=NodeType.FEATURE,
+            name=feat_name,
+            metadata={
+                "matched_api_count": len(matched_apis),
+                "matched_ui_count": len(matched_uis),
+                "matched_db_count": len(matched_dbs),
+                "has_implementation": has_implementation,
+                "cluster_type": "DERIVED_FROM_REQUIREMENTS" if requirements else "DERIVED_FROM_CODEBASE",
+            },
+        )
+        graph.add_node(f_node)
+        features.append(f_node)
 
     return features, requirements

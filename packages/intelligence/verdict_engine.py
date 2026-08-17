@@ -22,21 +22,26 @@ class VerdictEngine:
         medium_count = sum(1 for f in findings if f.severity == Severity.MEDIUM and f.status == "CONFIRMED")
         low_count = sum(1 for f in findings if f.severity == Severity.LOW and f.status == "CONFIRMED")
 
+        # Check unverified critical obligations
+        unverified_critical_checks = [
+            c for c in self.graph.audit_checks.values()
+            if c.required and c.status == "UNVERIFIED"
+        ]
+
         # Compute Domain Scores (0.0 to 10.0)
-        # Baseline is 10.0, deductions per confirmed finding severity in that domain
         def domain_score(category: FindingCategory, base=10.0) -> float:
             cat_findings = [f for f in findings if f.category == category and f.status == "CONFIRMED"]
             deduction = 0.0
             for f in cat_findings:
                 if f.severity == Severity.CRITICAL:
-                    deduction += 3.5
+                    deduction += 4.0
                 elif f.severity == Severity.HIGH:
                     deduction += 2.0
                 elif f.severity == Severity.MEDIUM:
                     deduction += 1.0
                 elif f.severity == Severity.LOW:
                     deduction += 0.5
-            return max(1.0, round(base - deduction, 1))
+            return max(0.0, round(base - deduction, 1))
 
         score_security = domain_score(FindingCategory.SECURITY)
         score_reliability = domain_score(FindingCategory.RELIABILITY)
@@ -45,7 +50,7 @@ class VerdictEngine:
         score_arch = domain_score(FindingCategory.ARCHITECTURE)
         score_requirements = domain_score(FindingCategory.MISSING_REQUIREMENT)
 
-        # Overall weighted score
+        # Overall Readiness Index
         overall = round(
             (
                 score_security * 0.25
@@ -58,9 +63,17 @@ class VerdictEngine:
             1,
         )
 
-        # Deterministic Verdict determination:
-        # Any CRITICAL issue or >= 2 HIGH issues immediately marks NOT PRODUCTION READY
-        if critical_count > 0 or high_count >= 2 or overall < 7.0:
+        # Blocker Gate Evaluation:
+        # A single CRITICAL finding or >= 2 HIGH findings immediately BLOCKS production release.
+        gate_failures = []
+        if critical_count > 0:
+            gate_failures.append(f"{critical_count} Critical security/integrity blocker(s) detected")
+        if high_count >= 2:
+            gate_failures.append(f"{high_count} High-risk vulnerabilities/dead user flows detected")
+        if len(unverified_critical_checks) > 10:
+            gate_failures.append(f"{len(unverified_critical_checks)} Required check obligations remain unverified")
+
+        if gate_failures:
             status = "NOT PRODUCTION READY"
             status_badge = "FAILED"
         elif high_count == 1 or medium_count >= 3:
@@ -74,15 +87,17 @@ class VerdictEngine:
         sorted_findings = sorted(
             [f for f in findings if f.status == "CONFIRMED"],
             key=lambda x: (
-                0 if x.severity == Severity.CRITICAL else (1 if x.severity == Severity.HIGH else 2)
+                0 if x.severity == Severity.CRITICAL else (1 if x.severity == Severity.HIGH else (2 if x.severity == Severity.MEDIUM else 3))
             ),
         )
-        top_blockers = [f.to_dict() for f in sorted_findings[:5]]
+        top_blockers = [f.to_dict() for f in sorted_findings[:6]]
 
         return {
             "verdict_status": status,
             "status_badge": status_badge,
             "overall_score": overall,
+            "gate_failures": gate_failures,
+            "unverified_critical_checks_count": len(unverified_critical_checks),
             "domain_scores": {
                 "Architecture": score_arch,
                 "Security": score_security,

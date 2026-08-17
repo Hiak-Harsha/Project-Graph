@@ -10,8 +10,11 @@ from pathlib import Path
 from typing import Optional, Any
 
 from .models import (
+    AuditCheck,
     AuditStatus,
     AuditTask,
+    CheckStatus,
+    ExecutionTier,
     Finding,
     GraphEdge,
     GraphNode,
@@ -25,6 +28,7 @@ class ProjectGraph:
         self.nodes: dict[str, GraphNode] = {}
         self.edges: list[GraphEdge] = []
         self.audit_tasks: dict[str, AuditTask] = {}
+        self.audit_checks: dict[str, AuditCheck] = {}
         self.findings: dict[str, Finding] = {}
         self.metadata: dict[str, Any] = {}
 
@@ -41,6 +45,13 @@ class ProjectGraph:
         self.audit_tasks[task.id] = task
         return task
 
+    def add_check(self, check: AuditCheck) -> AuditCheck:
+        self.audit_checks[check.id] = check
+        if check.target_id in self.nodes:
+            if check.id not in self.nodes[check.target_id].checks:
+                self.nodes[check.target_id].checks.append(check.id)
+        return check
+
     def add_finding(self, finding: Finding) -> Finding:
         self.findings[finding.id] = finding
         return finding
@@ -52,6 +63,9 @@ class ProjectGraph:
     # -- queries --------------------------------------------------------
     def get_node(self, node_id: str) -> Optional[GraphNode]:
         return self.nodes.get(node_id)
+
+    def get_checks_for_target(self, target_id: str) -> list[AuditCheck]:
+        return [c for c in self.audit_checks.values() if c.target_id == target_id]
 
     def nodes_of_type(self, node_type: NodeType) -> list[GraphNode]:
         return [n for n in self.nodes.values() if n.node_type == node_type]
@@ -74,34 +88,73 @@ class ProjectGraph:
             out[n.audit_status.value] = out.get(n.audit_status.value, 0) + 1
         return out
 
-    # -- P1 completeness invariant --------------------------------------
+    # -- P1 completeness & check obligation accounting -----------------
     def completeness_report(self) -> dict[str, Any]:
         """
-        P1 Invariant: Every discovered entity must end in
-        VERIFIED | FAILED | UNVERIFIED | NOT_APPLICABLE.
-        Nothing is silently dropped.
+        P1 Check-Obligation & Entity Accounting:
+        Every discoverable entity and every applicable check obligation
+        must terminate in a known status. Nothing is silently dropped.
         """
-        discovered = len(self.nodes)
-        verified = sum(1 for n in self.nodes.values() if n.audit_status == AuditStatus.VERIFIED)
-        failed = sum(1 for n in self.nodes.values() if n.audit_status == AuditStatus.FAILED)
-        na = sum(1 for n in self.nodes.values() if n.audit_status == AuditStatus.NOT_APPLICABLE)
-        unverified = sum(1 for n in self.nodes.values() if n.audit_status == AuditStatus.UNVERIFIED)
+        # 1. Entity-Level Accounting
+        discovered_entities = len(self.nodes)
+        verified_entities = sum(1 for n in self.nodes.values() if n.audit_status == AuditStatus.VERIFIED)
+        failed_entities = sum(1 for n in self.nodes.values() if n.audit_status == AuditStatus.FAILED)
+        na_entities = sum(1 for n in self.nodes.values() if n.audit_status == AuditStatus.NOT_APPLICABLE)
+        unverified_entities = sum(1 for n in self.nodes.values() if n.audit_status == AuditStatus.UNVERIFIED)
+        terminal_entities = verified_entities + failed_entities + na_entities
 
-        terminal = verified + failed + na
+        entity_coverage_pct = round((terminal_entities / discovered_entities * 100), 1) if discovered_entities > 0 else 0.0
 
-        # Coverage is the proportion of entities that have reached a terminal state (verified/failed/na)
-        coverage_pct = round((terminal / discovered * 100), 1) if discovered > 0 else 0.0
+        # 2. Check Obligation Accounting (First-class check lifecycle)
+        total_checks = len(self.audit_checks)
+        passed_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.PASSED)
+        failed_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.FAILED)
+        unverified_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.UNVERIFIED)
+        na_checks = sum(1 for c in self.audit_checks.values() if c.status == CheckStatus.NOT_APPLICABLE)
+        resolved_checks = passed_checks + failed_checks + na_checks
+
+        check_coverage_pct = round((resolved_checks / total_checks * 100), 1) if total_checks > 0 else 0.0
+
+        # 3. Multi-Tier Breakdown (Static AST vs Runtime Dynamic)
+        static_checks = [c for c in self.audit_checks.values() if c.execution_tier in (ExecutionTier.STATIC_AST, ExecutionTier.STATIC_PATTERN)]
+        runtime_checks = [c for c in self.audit_checks.values() if c.execution_tier in (ExecutionTier.TEST_RUNNER, ExecutionTier.RUNTIME_HTTP, ExecutionTier.RUNTIME_BROWSER)]
+
+        static_total = len(static_checks)
+        static_passed = sum(1 for c in static_checks if c.status == CheckStatus.PASSED)
+        static_coverage = round((static_passed / static_total * 100), 1) if static_total > 0 else 0.0
+
+        runtime_total = len(runtime_checks)
+        runtime_passed = sum(1 for c in runtime_checks if c.status == CheckStatus.PASSED)
+        runtime_executed = sum(1 for c in runtime_checks if c.status in (CheckStatus.PASSED, CheckStatus.FAILED))
+        runtime_coverage = round((runtime_executed / runtime_total * 100), 1) if runtime_total > 0 else 0.0
 
         return {
-            "discovered_entities": discovered,
-            "verified_entities": verified,
-            "failed_entities": failed,
-            "na_entities": na,
-            "terminal_entities": terminal,
-            "unverified_entities": unverified,
-            "audit_coverage_pct": coverage_pct,
-            "complete_accounting": (terminal + unverified) == discovered,
-            "audit_fully_resolved": unverified == 0 and discovered > 0,
+            # Entity dimensions
+            "discovered_entities": discovered_entities,
+            "verified_entities": verified_entities,
+            "failed_entities": failed_entities,
+            "na_entities": na_entities,
+            "terminal_entities": terminal_entities,
+            "unverified_entities": unverified_entities,
+            "entity_coverage_pct": entity_coverage_pct,
+            "audit_coverage_pct": entity_coverage_pct,
+            # Check obligation dimensions (P1 Truth)
+            "total_check_obligations": total_checks,
+            "passed_check_obligations": passed_checks,
+            "failed_check_obligations": failed_checks,
+            "unverified_check_obligations": unverified_checks,
+            "check_coverage_pct": check_coverage_pct,
+            # Multi-tier verification breakdown
+            "static_obligations_total": static_total,
+            "static_obligations_passed": static_passed,
+            "static_coverage_pct": static_coverage,
+            "runtime_obligations_total": runtime_total,
+            "runtime_obligations_executed": runtime_executed,
+            "runtime_obligations_passed": runtime_passed,
+            "runtime_coverage_pct": runtime_coverage,
+            # Invariants
+            "complete_accounting": (resolved_checks + unverified_checks) == total_checks and (terminal_entities + unverified_entities) == discovered_entities,
+            "audit_fully_resolved": unverified_checks == 0 and unverified_entities == 0 and total_checks > 0,
         }
 
     # -- serialization ----------------------------------------------------
@@ -111,13 +164,14 @@ class ProjectGraph:
             "nodes": [n.to_dict() for n in self.nodes.values()],
             "edges": [e.to_dict() for e in self.edges],
             "audit_tasks": [t.to_dict() for t in self.audit_tasks.values()],
+            "audit_checks": [c.to_dict() for c in self.audit_checks.values()],
             "findings": [f.to_dict() for f in self.findings.values()],
             "counts": self.counts_by_type(),
             "status_counts": self.status_counts(),
             "completeness": self.completeness_report(),
         }
 
-    def persist(self, db_path: str | Path) -> None:
+    def persist(self, db_path: str | Path, evidence_store: Optional[Any] = None) -> None:
         db_path = Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(db_path)
@@ -127,6 +181,8 @@ class ProjectGraph:
                 DROP TABLE IF EXISTS graph_nodes;
                 DROP TABLE IF EXISTS graph_edges;
                 DROP TABLE IF EXISTS audit_tasks;
+                DROP TABLE IF EXISTS audit_checks;
+                DROP TABLE IF EXISTS evidence_records;
                 DROP TABLE IF EXISTS findings;
 
                 CREATE TABLE graph_nodes (
@@ -134,7 +190,10 @@ class ProjectGraph:
                     node_type TEXT,
                     name TEXT,
                     metadata TEXT,
-                    audit_status TEXT
+                    audit_status TEXT,
+                    static_status TEXT,
+                    runtime_status TEXT,
+                    checks TEXT
                 );
                 CREATE TABLE graph_edges (
                     source TEXT,
@@ -154,6 +213,28 @@ class ProjectGraph:
                     dependencies TEXT,
                     results TEXT,
                     evidence_ids TEXT
+                );
+                CREATE TABLE audit_checks (
+                    id TEXT PRIMARY KEY,
+                    target_id TEXT,
+                    name TEXT,
+                    description TEXT,
+                    execution_tier TEXT,
+                    status TEXT,
+                    required INTEGER,
+                    evidence_ids TEXT,
+                    details TEXT,
+                    unverified_reason TEXT
+                );
+                CREATE TABLE evidence_records (
+                    id TEXT PRIMARY KEY,
+                    evidence_type TEXT,
+                    target_id TEXT,
+                    summary TEXT,
+                    source_location TEXT,
+                    sha256_hash TEXT,
+                    timestamp TEXT,
+                    payload TEXT
                 );
                 CREATE TABLE findings (
                     id TEXT PRIMARY KEY,
@@ -176,9 +257,18 @@ class ProjectGraph:
                 """
             )
             conn.executemany(
-                "INSERT INTO graph_nodes VALUES (?,?,?,?,?)",
+                "INSERT INTO graph_nodes VALUES (?,?,?,?,?,?,?,?)",
                 [
-                    (n.id, n.node_type.value, n.name, json.dumps(n.metadata), n.audit_status.value)
+                    (
+                        n.id,
+                        n.node_type.value,
+                        n.name,
+                        json.dumps(n.metadata),
+                        n.audit_status.value,
+                        n.static_status.value,
+                        n.runtime_status.value,
+                        json.dumps(n.checks),
+                    )
                     for n in self.nodes.values()
                 ],
             )
@@ -213,6 +303,41 @@ class ProjectGraph:
                     for t in self.audit_tasks.values()
                 ],
             )
+            conn.executemany(
+                "INSERT INTO audit_checks VALUES (?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        c.id,
+                        c.target_id,
+                        c.name,
+                        c.description,
+                        c.execution_tier.value,
+                        c.status.value,
+                        int(c.required),
+                        json.dumps(c.evidence_ids),
+                        json.dumps(c.details),
+                        c.unverified_reason,
+                    )
+                    for c in self.audit_checks.values()
+                ],
+            )
+            if evidence_store is not None:
+                conn.executemany(
+                    "INSERT INTO evidence_records VALUES (?,?,?,?,?,?,?,?)",
+                    [
+                        (
+                            ev.id,
+                            ev.evidence_type.value if hasattr(ev.evidence_type, "value") else str(ev.evidence_type),
+                            ev.target_id,
+                            ev.summary,
+                            ev.source_location,
+                            ev.sha256_hash,
+                            ev.timestamp,
+                            json.dumps(ev.payload),
+                        )
+                        for ev in evidence_store.all()
+                    ],
+                )
             conn.executemany(
                 "INSERT INTO findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [

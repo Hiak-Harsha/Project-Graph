@@ -11,13 +11,15 @@ from pathlib import Path
 from typing import Optional
 
 from packages.evidence import EvidenceStore, EvidenceType
-from packages.project_graph.models import AuditStatus, GraphNode
+from packages.project_graph.models import AuditStatus, CheckStatus, GraphNode
+from packages.project_graph.store import ProjectGraph
 
 
 class UIVerifier:
-    def __init__(self, root: Path, evidence_store: EvidenceStore) -> None:
+    def __init__(self, root: Path, evidence_store: EvidenceStore, graph: Optional[ProjectGraph] = None) -> None:
         self.root = root
         self.evidence_store = evidence_store
+        self.graph = graph
 
     def verify_ui_element(self, node: GraphNode) -> tuple[AuditStatus, dict, list[str]]:
         meta = node.metadata
@@ -28,6 +30,13 @@ class UIVerifier:
         has_handler = meta.get("has_handler", False)
         handler_name = meta.get("handler_name")
         disabled = meta.get("disabled", False)
+
+        checks = self.graph.get_checks_for_target(node.id) if self.graph else []
+        handler_check = next((c for c in checks if "HANDLER" in c.id), None)
+        loading_check = next((c for c in checks if "LOADING-STATE" in c.id), None)
+        error_check = next((c for c in checks if "ERROR-STATE" in c.id), None)
+        click_check = next((c for c in checks if "CLICK" in c.id), None)
+        net_check = next((c for c in checks if "NETWORK-DISPATCH" in c.id), None)
 
         evidence_ids: list[str] = []
         checks_result: dict[str, bool] = {
@@ -48,9 +57,15 @@ class UIVerifier:
             except OSError:
                 pass
 
-        # 2. Check handler attachment
+        # 2. Check handler attachment (Static Tier)
         if not has_handler and el_type in ("BUTTON", "LINK", "FORM"):
             # DEAD INTERACTION DETECTED
+            if handler_check:
+                handler_check.status = CheckStatus.FAILED
+            if click_check:
+                click_check.status = CheckStatus.FAILED
+                click_check.unverified_reason = "Cannot execute click on dead control with missing handler."
+
             ev = self.evidence_store.add(
                 evidence_type=EvidenceType.STATIC_PATTERN_ANALYSIS,
                 target_id=node.id,
@@ -66,25 +81,49 @@ class UIVerifier:
                 },
             )
             evidence_ids.append(ev.id)
+            if handler_check:
+                handler_check.evidence_ids.append(ev.id)
+
+            node.static_status = AuditStatus.FAILED
+            node.runtime_status = AuditStatus.FAILED
             node.audit_status = AuditStatus.FAILED
             checks_result["handler_attached_and_valid"] = False
             return AuditStatus.FAILED, checks_result, evidence_ids
 
         # If handler is present, inspect component for loading/error state
-        checks_result["handler_attached_and_valid"] = True
-        checks_result["click_executes_expected_action"] = True
+        if handler_check:
+            handler_check.status = CheckStatus.PASSED
 
+        checks_result["handler_attached_and_valid"] = True
         has_loading = any(k in file_content.lower() for k in ["isloading", "loading", "spinner", "pending", "disabled={load"])
         has_error_handling = any(k in file_content.lower() for k in ["catch", "error", "toast.error", "alert", "iserror"])
 
         checks_result["loading_state_rendered"] = has_loading
         checks_result["failure_state_handled"] = has_error_handling
 
-        # If it has a handler and valid behavior
+        if loading_check:
+            loading_check.status = CheckStatus.PASSED if has_loading else CheckStatus.UNVERIFIED
+            if not has_loading:
+                loading_check.unverified_reason = "No explicit loading/spinner state found in component."
+
+        if error_check:
+            error_check.status = CheckStatus.PASSED if has_error_handling else CheckStatus.UNVERIFIED
+            if not has_error_handling:
+                error_check.unverified_reason = "No explicit catch/error toast handler found in component."
+
+        # Dynamic Browser Checks: Honestly report UNVERIFIED when browser sandbox not booted
+        if click_check:
+            click_check.status = CheckStatus.UNVERIFIED
+            click_check.unverified_reason = "Chromium browser laboratory offline (requires docker sandbox boot)."
+
+        if net_check:
+            net_check.status = CheckStatus.UNVERIFIED
+            net_check.unverified_reason = "Network trace requires active browser session."
+
         ev = self.evidence_store.add(
             evidence_type=EvidenceType.STATIC_PATTERN_ANALYSIS,
             target_id=node.id,
-            summary=f"UI element '{label}' verified: handler '{handler_name or 'href'}' attached.",
+            summary=f"UI element '{label}' static check: handler '{handler_name or 'href'}' attached.",
             source_location=f"{file_rel}:{line_no}",
             payload={
                 "element_type": el_type,
@@ -95,13 +134,12 @@ class UIVerifier:
             },
         )
         evidence_ids.append(ev.id)
+        if handler_check:
+            handler_check.evidence_ids.append(ev.id)
 
-        # Honest classification: fully VERIFIED if complete error/loading states exist or simple input, otherwise UNVERIFIED state gap
-        if has_loading and has_error_handling:
-            status = AuditStatus.VERIFIED
-        elif el_type == "INPUT":
-            status = AuditStatus.VERIFIED
-        else:
-            status = AuditStatus.VERIFIED
-        node.audit_status = status
-        return status, checks_result, evidence_ids
+        node.static_status = AuditStatus.VERIFIED
+        node.runtime_status = AuditStatus.UNVERIFIED
+        node.unverified_reasons = ["Runtime click verification unexecuted (browser offline)."]
+        node.audit_status = AuditStatus.VERIFIED
+
+        return node.audit_status, checks_result, evidence_ids

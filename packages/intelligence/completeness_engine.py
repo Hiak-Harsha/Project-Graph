@@ -40,4 +40,13 @@ class CompletenessEngine:
 
         report = self.graph.completeness_report()
         report["by_category"] = nodes_by_type
+        report["check_obligations"] = {
+            "total": report.get("total_check_obligations", 0),
+            "passed": report.get("passed_check_obligations", 0),
+            "failed": report.get("failed_check_obligations", 0),
+            "unverified": report.get("unverified_check_obligations", 0),
+            "check_coverage_pct": report.get("check_coverage_pct", 0.0),
+            "static_coverage_pct": report.get("static_coverage_pct", 0.0),
+            "runtime_coverage_pct": report.get("runtime_coverage_pct", 0.0),
+        }
         return report

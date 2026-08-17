@@ -133,6 +133,10 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><line x1="9" y1="6" x2="15" y2="6"/><line x1="6" y1="9" x2="6" y2="15"/><line x1="18" y1="9" x2="18" y2="15"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
           Interactive Project Graph
         </button>
+        <button class="tab-btn" data-tab="checks">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Check Obligations (<span id="tab-checks-count">0</span>)
+        </button>
         <button class="tab-btn" data-tab="tasks">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           Audit Tasks Manifest (<span id="tab-tasks-count">0</span>)
@@ -176,6 +180,25 @@
             <span class="graph-legend-item"><span class="legend-dot dot-test"></span> Test Suite</span>
           </div>
           <svg id="project-graph-svg" class="graph-svg" width="100%" height="560"></svg>
+        </div>
+      </section>
+
+      <!-- Tab 2.5: Check Obligations -->
+      <section class="tab-pane" id="pane-checks">
+        <div class="table-card glass-panel">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Check ID</th>
+                <th>Target ID</th>
+                <th>Obligation Name</th>
+                <th>Execution Tier</th>
+                <th>Status</th>
+                <th>Details / Reason</th>
+              </tr>
+            </thead>
+            <tbody id="checks-tbody"></tbody>
+          </table>
         </div>
       </section>
 

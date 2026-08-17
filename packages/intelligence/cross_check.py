@@ -65,7 +65,7 @@ class CrossCheckEngine:
         # 2. Check for Broken Object-Level Authorization (BOLA / IDOR)
         for api in self.graph.nodes_of_type(NodeType.API_ENDPOINT):
             evs = self.evidence_store.find_by_target(api.id)
-            auth_failures = [e for e in evs if e.evidence_type == EvidenceType.AUTH_BOUNDARY_TEST and "BOLA" in e.summary]
+            auth_failures = [e for e in evs if "BOLA" in e.summary or "IDOR" in e.summary]
             if auth_failures:
                 f = Finding(
                     id=f"FINDING-{finding_idx:04d}",
@@ -121,35 +121,67 @@ class CrossCheckEngine:
                 findings.append(f)
                 finding_idx += 1
 
-        # 4. Check for Testing Gaps on Critical Features
-        tests = self.graph.nodes_of_type(NodeType.TEST)
+        # 4. Check for Advertised Features Without Implementation (Negative Space)
         for feat in self.graph.nodes_of_type(NodeType.FEATURE):
-            edges_out = self.graph.edges_from(feat.id)
-            test_edges = [e for e in edges_out if e.relationship.value == "TESTED_BY"]
-            if not test_edges and ("auth" in feat.name.lower() or "resume" in feat.name.lower()):
+            if feat.metadata.get("has_implementation") is False:
                 ev = self.evidence_store.add(
                     evidence_type=EvidenceType.STATIC_ANALYSIS,
                     target_id=feat.id,
-                    summary=f"Critical feature '{feat.name}' has 0 associated unit or integration tests.",
-                    source_location=None,
-                    payload={"feature": feat.name, "test_count": 0},
+                    summary=f"Advertised feature '{feat.name}' has 0 matching UI components, API endpoints, or database models.",
+                    source_location="README.md",
+                    payload={"feature": feat.name, "matched_api_count": 0, "matched_ui_count": 0, "matched_db_count": 0},
                 )
                 f = Finding(
                     id=f"FINDING-{finding_idx:04d}",
-                    title=f"Zero Test Coverage on Critical Workflow '{feat.name}'",
-                    category=FindingCategory.TESTING_GAP,
+                    title=f"Advertised Feature Missing from Implementation: '{feat.name}'",
+                    category=FindingCategory.MISSING_REQUIREMENT,
                     severity=Severity.HIGH,
                     status="CONFIRMED",
-                    confidence=0.95,
+                    confidence=0.99,
                     affected_feature=feat.name,
                     affected_nodes=[feat.id],
-                    description=f"Feature '{feat.name}' contains critical business logic and API endpoints but lacks automated tests in the test suite.",
-                    observed_behavior="No test specifications matching feature domain were discovered in repository tests.",
-                    expected_behavior="Critical revenue and data mutation flows must maintain automated test coverage.",
+                    description=f"Feature '{feat.name}' is explicitly advertised as a core capability in project documentation, but no corresponding backend routes, database entities, or frontend UI components exist in the repository.",
+                    observed_behavior="0 routes, 0 components, and 0 database models discovered for this feature.",
+                    expected_behavior="All advertised product capabilities in project specifications must be backed by working code.",
                     evidence_ids=[ev.id],
-                    root_cause="Missing unit/integration test specifications.",
-                    recommendation="Author comprehensive end-to-end and unit tests covering positive and negative edge cases.",
-                    reproduction_steps=["1. Run test runner (pytest/jest)", f"2. Notice zero test suites targeting {feat.name}"],
+                    root_cause="Feature was documented/planned but implementation was omitted or abandoned.",
+                    recommendation=f"Implement the '{feat.name}' user flow and API contracts, or remove the claim from documentation.",
+                    reproduction_steps=[
+                        "1. Read README.md / product specification",
+                        f"2. Search codebase for '{feat.name}'",
+                        "3. Confirm zero matching implementation files.",
+                    ],
+                )
+                self.graph.add_finding(f)
+                findings.append(f)
+                finding_idx += 1
+
+        # 5. Check for Weak Test Assertions / Testing Gaps
+        for test in self.graph.nodes_of_type(NodeType.TEST):
+            checks = self.graph.get_checks_for_target(test.id)
+            struct_check = next((c for c in checks if "STRUCTURE" in c.id), None)
+            if struct_check and struct_check.status == "FAILED":
+                weak_list = struct_check.details.get("weak_assertions", [])
+                f = Finding(
+                    id=f"FINDING-{finding_idx:04d}",
+                    title=f"Non-Meaningful Test Assertions in Suite '{test.name}'",
+                    category=FindingCategory.TESTING_GAP,
+                    severity=Severity.MEDIUM,
+                    status="CONFIRMED",
+                    confidence=0.98,
+                    affected_feature="Test Quality & CI Reliability",
+                    affected_nodes=[test.id],
+                    description=f"Test suite '{test.name}' contains {len(weak_list)} test cases with non-meaningful trivial assertions (e.g. 'assert True') that provide false positive pass signals.",
+                    observed_behavior="Tests pass unconditionally without validating actual state, API responses, or error conditions.",
+                    expected_behavior="Test cases must assert deterministic invariants, contract payloads, and status codes.",
+                    evidence_ids=struct_check.evidence_ids,
+                    root_cause="Placeholder assertions left in test suite without actual verification logic.",
+                    recommendation="Replace trivial `assert True` with assertions on returned status codes, payload structures, and database state.",
+                    reproduction_steps=[
+                        f"1. Open {test.metadata.get('file')}",
+                        f"2. Inspect test cases: {', '.join(weak_list[:3])}",
+                        "3. Observe tests succeeding even if underlying code is broken.",
+                    ],
                 )
                 self.graph.add_finding(f)
                 findings.append(f)

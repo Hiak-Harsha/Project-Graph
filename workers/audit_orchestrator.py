@@ -135,6 +135,7 @@ def print_audit_report(summary: dict) -> None:
     c = summary["completeness"]
     fp = summary["fingerprint"]
     prod = summary["product_understanding"]
+    checks = c.get("check_obligations", {})
 
     print("=" * 70)
     print("AI PRODUCTION AUDIT PLATFORM — EXECUTIVE AUDIT REPORT")
@@ -145,6 +146,10 @@ def print_audit_report(summary: dict) -> None:
     print("-" * 70)
     print(f"EXECUTIVE VERDICT:  {v['verdict_status']} (Badge: {v['status_badge']})")
     print(f"OVERALL READINESS:  {v['overall_score']} / 10.0")
+    if v.get("gate_failures"):
+        print("PRODUCTION BLOCKER GATES:")
+        for gf in v["gate_failures"]:
+            print(f"  [X] {gf}")
     print("-" * 70)
     print("DOMAIN SCORES:")
     for domain, score in v["domain_scores"].items():
@@ -152,8 +157,9 @@ def print_audit_report(summary: dict) -> None:
         bar = "#" * filled + "-" * (10 - filled)
         print(f"  {domain:<24} [{bar}] {score:>4}/10")
     print("-" * 70)
-    print(f"AUDIT COVERAGE:     {c['audit_coverage_pct']}% of discoverable universe resolved")
-    print(f"ACCOUNTING CHECK:   {c['terminal_entities'] + c['unverified_entities']} / {c['discovered_entities']} entities accounted for (P1 Invariant: {'PASS' if c['complete_accounting'] else 'FAIL'})")
+    print(f"CHECK OBLIGATIONS:  {checks.get('total', 0)} Total ({checks.get('passed', 0)} Passed, {checks.get('failed', 0)} Failed, {checks.get('unverified', 0)} Unverified)")
+    print(f"MULTI-TIER COVERAGE: Static AST: {checks.get('static_coverage_pct', 100)}% | Dynamic Runtime: {checks.get('runtime_coverage_pct', 0)}%")
+    print(f"P1 ACCOUNTING:      {c['terminal_entities'] + c['unverified_entities']} / {c['discovered_entities']} entities accounted for (P1 Invariant: {'PASS' if c['complete_accounting'] else 'FAIL'})")
     print("-" * 70)
     print(f"CONFIRMED FINDINGS: {v['findings_summary']['critical']} Critical, {v['findings_summary']['high']} High, {v['findings_summary']['medium']} Medium, {v['findings_summary']['low']} Low")
     print("\nTOP PRODUCTION BLOCKERS:")
@@ -186,8 +192,8 @@ def main() -> None:
         print(f"\nFull audit artifact saved to {args.out}")
 
     if args.db:
-        graph.persist(args.db)
-        print(f"Project Graph persisted to {args.db}")
+        graph.persist(args.db, evidence_store)
+        print(f"Project Graph & Evidence Vault persisted to {args.db}")
 
 
 if __name__ == "__main__":

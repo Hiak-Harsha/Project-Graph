@@ -30,6 +30,8 @@ function initTabs() {
 
       if (btn.dataset.tab === 'graph' && GRAPH_DATA) {
         renderProjectGraph(GRAPH_DATA);
+      } else if (btn.dataset.tab === 'checks') {
+        renderChecks();
       }
     });
   });
@@ -137,6 +139,7 @@ function populateDashboard(data) {
   document.getElementById('count-low').textContent = fSummary.low;
 
   renderFindings(data.findings);
+  renderChecks();
   renderTasks();
   renderEvidence(data.evidence_records);
   renderCoverage(c.by_category);
@@ -238,12 +241,44 @@ function showFindingModal(f) {
   document.getElementById('modal-overlay').classList.add('active');
 }
 
+async function renderChecks() {
+  const tbody = document.getElementById('checks-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6">Loading check obligations...</td></tr>';
+  try {
+    const res = await fetch('/api/audits/checks');
+    const checks = await res.json();
+    const countEl = document.getElementById('tab-checks-count');
+    if (countEl) countEl.innerText = checks.length;
+
+    tbody.innerHTML = '';
+    checks.forEach(c => {
+      const tr = document.createElement('tr');
+      const statusClass = c.status === 'PASSED' ? 'passed' : (c.status === 'FAILED' ? 'failed' : 'unverified');
+      tr.innerHTML = `
+        <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(c.id)}</td>
+        <td style="font-family: var(--font-mono); color: var(--accent);">${escapeHtml(c.target_id)}</td>
+        <td>${escapeHtml(c.name)}</td>
+        <td><span class="cat-tag">${escapeHtml(c.execution_tier)}</span></td>
+        <td><span class="status-pill status-${statusClass}">${escapeHtml(c.status)}</span></td>
+        <td style="color: var(--text-dim); font-size: 0.85rem;">${escapeHtml(c.unverified_reason || c.description)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 async function renderTasks() {
   const tbody = document.getElementById('tasks-tbody');
   tbody.innerHTML = '<tr><td colspan="5">Loading tasks...</td></tr>';
   try {
     const res = await fetch('/api/audits/tasks');
     const tasks = await res.json();
+    const countEl = document.getElementById('tab-tasks-count');
+    if (countEl) countEl.innerText = tasks.length;
+
     tbody.innerHTML = '';
     tasks.forEach(t => {
       const tr = document.createElement('tr');

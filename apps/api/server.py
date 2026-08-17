@@ -115,6 +115,8 @@ class AuditRequestHandler(BaseHTTPRequestHandler):
             self.send_json([f.to_dict() for f in LATEST_GRAPH.findings.values()])
         elif path == "/api/audits/tasks":
             self.send_json([t.to_dict() for t in LATEST_GRAPH.audit_tasks.values()])
+        elif path == "/api/audits/checks":
+            self.send_json([c.to_dict() for c in LATEST_GRAPH.audit_checks.values()])
         elif path == "/api/audits/evidence":
             self.send_json(LATEST_EVIDENCE_STORE.to_dict_list())
         elif path == "/api/audits/coverage":
