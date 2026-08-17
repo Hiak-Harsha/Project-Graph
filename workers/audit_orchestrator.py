@@ -122,6 +122,7 @@ def run_full_audit(repo_path: Path) -> tuple[ProjectGraph, EvidenceStore, dict]:
         "completeness": coverage_report,
         "verdict": verdict,
         "evidence_records": evidence_store.to_dict_list(),
+        "claims": evidence_store.claims_to_dict_list(),
         "findings": [f.to_dict() for f in graph.findings.values()],
         "elapsed_seconds": elapsed,
     }

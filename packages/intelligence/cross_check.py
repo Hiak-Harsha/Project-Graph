@@ -58,6 +58,13 @@ class CrossCheckEngine:
                         "3. Click element and observe no event dispatch or network call.",
                     ],
                 )
+                self.evidence_store.add_claim(
+                    statement=f"Actionable control '{ui.name}' has no event listener or handler function attached.",
+                    target_id=ui.id,
+                    evidence_ids=ev_ids,
+                    evidence_strength="STATIC_AST_PROVEN",
+                    status="CONFIRMED",
+                )
                 self.graph.add_finding(f)
                 findings.append(f)
                 finding_idx += 1
@@ -67,6 +74,7 @@ class CrossCheckEngine:
             evs = self.evidence_store.find_by_target(api.id)
             auth_failures = [e for e in evs if "BOLA" in e.summary or "IDOR" in e.summary]
             if auth_failures:
+                ev_ids = [e.id for e in auth_failures]
                 f = Finding(
                     id=f"FINDING-{finding_idx:04d}",
                     title=f"Broken Object-Level Authorization (BOLA / IDOR) on '{api.name}'",
@@ -79,13 +87,20 @@ class CrossCheckEngine:
                     description=f"Endpoint '{api.name}' accepts a resource identifier parameter without verifying that the authenticated user possesses ownership of that resource.",
                     observed_behavior="Direct object reference can be queried by any authenticated or unauthenticated client without user ID tenancy scoping.",
                     expected_behavior="The backend must assert `resource.user_id == current_user.id` and reject unauthorized requests with HTTP 403 Forbidden.",
-                    evidence_ids=[e.id for e in auth_failures],
+                    evidence_ids=ev_ids,
                     root_cause="Missing ownership assertion in database query filter or authorization middleware.",
                     recommendation="Add user tenancy check in the repository filter or query layer.",
                     reproduction_steps=[
                         f"1. Send {api.metadata.get('method')} to {api.metadata.get('path')} as User A with User B's resource ID",
                         "2. Observe server returning 200 OK with User B's private data instead of 403 Forbidden.",
                     ],
+                )
+                self.evidence_store.add_claim(
+                    statement=f"Endpoint '{api.name}' permits cross-tenant object access without ownership tenancy validation.",
+                    target_id=api.id,
+                    evidence_ids=ev_ids,
+                    evidence_strength="RUNTIME_OBSERVED",
+                    status="CONFIRMED",
                 )
                 self.graph.add_finding(f)
                 findings.append(f)
@@ -96,6 +111,7 @@ class CrossCheckEngine:
             evs = self.evidence_store.find_by_target(api.id)
             timeout_failures = [e for e in evs if "without timeout or retry" in e.summary]
             if timeout_failures:
+                ev_ids = [e.id for e in timeout_failures]
                 f = Finding(
                     id=f"FINDING-{finding_idx:04d}",
                     title=f"Missing Timeout & Failure Resilience on External Call in '{api.name}'",
@@ -108,7 +124,7 @@ class CrossCheckEngine:
                     description=f"Endpoint '{api.name}' dispatches requests to an external API (LLM/Payment/Cloud) without an explicit request timeout or circuit breaker.",
                     observed_behavior="When the external provider experiences latency or outages, the request thread blocks indefinitely.",
                     expected_behavior="All external HTTP/SDK calls must enforce bounded timeouts (e.g. 15s) with appropriate retry/fallback policies.",
-                    evidence_ids=[e.id for e in timeout_failures],
+                    evidence_ids=ev_ids,
                     root_cause="HTTP/SDK client instantiated with default infinite timeout.",
                     recommendation="Configure explicit `timeout` parameter and wrap call in try/except with user-facing fallback error response.",
                     reproduction_steps=[
@@ -116,6 +132,13 @@ class CrossCheckEngine:
                         "2. Simulate upstream latency > 30s",
                         "3. Observe server socket hanging indefinitely.",
                     ],
+                )
+                self.evidence_store.add_claim(
+                    statement=f"Endpoint '{api.name}' makes external calls without bounded request timeout or failure fallback.",
+                    target_id=api.id,
+                    evidence_ids=ev_ids,
+                    evidence_strength="STATIC_AST_PROVEN",
+                    status="CONFIRMED",
                 )
                 self.graph.add_finding(f)
                 findings.append(f)
@@ -152,6 +175,13 @@ class CrossCheckEngine:
                         "3. Confirm zero matching implementation files.",
                     ],
                 )
+                self.evidence_store.add_claim(
+                    statement=f"Feature '{feat.name}' was advertised in project documentation but has 0 backing code files in repository.",
+                    target_id=feat.id,
+                    evidence_ids=[ev.id],
+                    evidence_strength="STATIC_AST_PROVEN",
+                    status="CONFIRMED",
+                )
                 self.graph.add_finding(f)
                 findings.append(f)
                 finding_idx += 1
@@ -182,6 +212,13 @@ class CrossCheckEngine:
                         f"2. Inspect test cases: {', '.join(weak_list[:3])}",
                         "3. Observe tests succeeding even if underlying code is broken.",
                     ],
+                )
+                self.evidence_store.add_claim(
+                    statement=f"Test suite '{test.name}' relies on trivial 'assert True' assertions offering zero regression protection.",
+                    target_id=test.id,
+                    evidence_ids=struct_check.evidence_ids,
+                    evidence_strength="STATIC_AST_PROVEN",
+                    status="CONFIRMED",
                 )
                 self.graph.add_finding(f)
                 findings.append(f)

@@ -29,13 +29,20 @@ class NodeType(str, Enum):
     CLASS = "CLASS"
     UI_ELEMENT = "UI_ELEMENT"
     PAGE = "PAGE"
+    ROUTE = "ROUTE"
+    FORM = "FORM"
+    INPUT = "INPUT"
     API_ENDPOINT = "API_ENDPOINT"
     DATABASE_ENTITY = "DATABASE_ENTITY"
+    DATABASE_FIELD = "DATABASE_FIELD"
     EXTERNAL_SERVICE = "EXTERNAL_SERVICE"
     CONFIG = "CONFIG"
     TEST = "TEST"
     FEATURE = "FEATURE"
     REQUIREMENT = "REQUIREMENT"
+    AUTH_IDENTITY = "AUTH_IDENTITY"
+    USER_FLOW = "USER_FLOW"
+    STATE = "STATE"
 
 
 class EdgeRelationship(str, Enum):
@@ -50,6 +57,17 @@ class EdgeRelationship(str, Enum):
     IMPLEMENTS = "IMPLEMENTS"
     DEPENDS_ON = "DEPENDS_ON"
     PROTECTED_BY = "PROTECTED_BY"
+    TRANSITIONS_TO = "TRANSITIONS_TO"
+    SUBMITS_TO = "SUBMITS_TO"
+
+
+class EvidenceLevel(str, Enum):
+    DIRECT_STATIC = "DIRECT_STATIC"
+    STATIC_DATAFLOW = "STATIC_DATAFLOW"
+    RUNTIME_OBSERVED = "RUNTIME_OBSERVED"
+    TEST_OBSERVED = "TEST_OBSERVED"
+    INFERRED = "INFERRED"
+    POSSIBLE = "POSSIBLE"
 
 
 class Severity(str, Enum):
@@ -133,13 +151,20 @@ _PREFIX = {
     NodeType.CLASS: "CLASS",
     NodeType.UI_ELEMENT: "UI",
     NodeType.PAGE: "PAGE",
+    NodeType.ROUTE: "ROUTE",
+    NodeType.FORM: "FORM",
+    NodeType.INPUT: "INPUT",
     NodeType.API_ENDPOINT: "API",
     NodeType.DATABASE_ENTITY: "DB",
+    NodeType.DATABASE_FIELD: "DBF",
     NodeType.EXTERNAL_SERVICE: "EXT",
     NodeType.CONFIG: "CFG",
     NodeType.TEST: "TEST",
     NodeType.FEATURE: "FEATURE",
     NodeType.REQUIREMENT: "REQ",
+    NodeType.AUTH_IDENTITY: "IDENT",
+    NodeType.USER_FLOW: "FLOW",
+    NodeType.STATE: "STATE",
 }
 
 
@@ -165,7 +190,22 @@ class GraphNode:
     checks: list[str] = field(default_factory=list)
     unverified_reasons: list[str] = field(default_factory=list)
 
-    def derive_audit_status(self) -> AuditStatus:
+    def derive_audit_status(self, assigned_checks: Optional[list[AuditCheck]] = None) -> AuditStatus:
+        if assigned_checks:
+            req_checks = [c for c in assigned_checks if c.required]
+            if not req_checks:
+                return AuditStatus.VERIFIED
+
+            if any(c.status in (CheckStatus.FAILED, CheckStatus.ERROR) for c in req_checks):
+                return AuditStatus.FAILED
+
+            if any(c.status in (CheckStatus.UNVERIFIED, CheckStatus.BLOCKED, CheckStatus.PENDING) for c in req_checks):
+                return AuditStatus.UNVERIFIED
+
+            if all(c.status in (CheckStatus.PASSED, CheckStatus.NOT_APPLICABLE, CheckStatus.SKIPPED) for c in req_checks):
+                return AuditStatus.VERIFIED
+
+        # Fallback to tier statuses if no checks provided
         if self.static_status == AuditStatus.FAILED or self.runtime_status == AuditStatus.FAILED:
             return AuditStatus.FAILED
         if self.static_status == AuditStatus.UNVERIFIED or self.runtime_status == AuditStatus.UNVERIFIED:
@@ -178,8 +218,8 @@ class GraphNode:
             return AuditStatus.VERIFIED
         return AuditStatus.UNVERIFIED
 
-    def refresh_audit_status(self) -> AuditStatus:
-        self.audit_status = self.derive_audit_status()
+    def refresh_audit_status(self, assigned_checks: Optional[list[AuditCheck]] = None) -> AuditStatus:
+        self.audit_status = self.derive_audit_status(assigned_checks)
         return self.audit_status
 
     def to_dict(self) -> dict[str, Any]:
@@ -199,11 +239,13 @@ class GraphEdge:
     static_evidence: bool = False
     runtime_evidence: bool = False
     confidence: float = 1.0
+    evidence_level: EvidenceLevel = EvidenceLevel.DIRECT_STATIC
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["relationship"] = self.relationship.value
+        d["evidence_level"] = self.evidence_level.value
         return d
 
 

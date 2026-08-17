@@ -119,6 +119,11 @@ class AuditRequestHandler(BaseHTTPRequestHandler):
             self.send_json([c.to_dict() for c in LATEST_GRAPH.audit_checks.values()])
         elif path == "/api/audits/evidence":
             self.send_json(LATEST_EVIDENCE_STORE.to_dict_list())
+        elif path == "/api/audits/claims":
+            self.send_json(LATEST_EVIDENCE_STORE.claims_to_dict_list())
+        elif path == "/api/audits/capabilities":
+            from packages.sandbox.environment import detect_environment_capabilities
+            self.send_json(detect_environment_capabilities().to_dict())
         elif path == "/api/audits/coverage":
             self.send_json(LATEST_SUMMARY.get("completeness", {}))
         else:

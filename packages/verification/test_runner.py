@@ -132,7 +132,7 @@ class TestRunnerVerifier:
 
             node.static_status = AuditStatus.FAILED if has_weak_tests else AuditStatus.VERIFIED
             node.runtime_status = AuditStatus.VERIFIED if passed else AuditStatus.FAILED
-            node.refresh_audit_status()
+            node.refresh_audit_status(checks)
 
             return node.audit_status, {"passed": passed, "duration": duration, "weak_assertions": weak_assertions}, evidence_ids
 
@@ -141,5 +141,5 @@ class TestRunnerVerifier:
                 exec_check.status = CheckStatus.FAILED
                 exec_check.unverified_reason = f"Test execution failed with error: {e}"
             node.runtime_status = AuditStatus.FAILED
-            node.audit_status = AuditStatus.FAILED
-            return AuditStatus.FAILED, {"error": str(e)}, evidence_ids
+            node.refresh_audit_status(checks)
+            return node.audit_status, {"error": str(e)}, evidence_ids

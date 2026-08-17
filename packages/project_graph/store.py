@@ -62,7 +62,7 @@ class ProjectGraph:
 
     def recompute_all_audit_statuses(self) -> None:
         for node in self.nodes.values():
-            node.refresh_audit_status()
+            node.refresh_audit_status(self.get_checks_for_target(node.id))
 
     # -- queries --------------------------------------------------------
     def get_node(self, node_id: str) -> Optional[GraphNode]:
@@ -206,6 +206,7 @@ class ProjectGraph:
                     static_evidence INTEGER,
                     runtime_evidence INTEGER,
                     confidence REAL,
+                    evidence_level TEXT,
                     metadata TEXT
                 );
                 CREATE TABLE audit_tasks (
@@ -287,7 +288,7 @@ class ProjectGraph:
                 ],
             )
             conn.executemany(
-                "INSERT INTO graph_edges VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO graph_edges VALUES (?,?,?,?,?,?,?,?)",
                 [
                     (
                         e.source,
@@ -296,6 +297,7 @@ class ProjectGraph:
                         int(e.static_evidence),
                         int(e.runtime_evidence),
                         e.confidence,
+                        e.evidence_level.value if hasattr(e.evidence_level, "value") else str(e.evidence_level),
                         json.dumps(e.metadata),
                     )
                     for e in self.edges

@@ -38,6 +38,14 @@ class Evidence:
     payload: dict[str, Any] = field(default_factory=dict)
     sha256_hash: str = ""
     timestamp: float = field(default_factory=time.time)
+    audit_id: str = "AUDIT-0001"
+    execution_id: Optional[str] = None
+    commit_sha: Optional[str] = None
+    environment_id: str = "SANDBOX_RUNTIME"
+    tool_version: str = "2.0.0"
+    producer: str = "VerificationRunner"
+    artifact_uri: Optional[str] = None
+    mime_type: str = "application/json"
 
     def __post_init__(self) -> None:
         if not self.sha256_hash:
@@ -46,5 +54,22 @@ class Evidence:
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        d["evidence_type"] = self.evidence_type.value
+        d["evidence_type"] = self.evidence_type.value if hasattr(self.evidence_type, "value") else str(self.evidence_type)
         return d
+
+
+@dataclass
+class EvidenceClaim:
+    id: str
+    statement: str
+    target_id: str
+    evidence_ids: list[str]
+    counter_evidence_ids: list[str] = field(default_factory=list)
+    evidence_strength: str = "RUNTIME_OBSERVED"  # CRYPTOGRAPHIC_RAW | RUNTIME_OBSERVED | STATIC_AST_PROVEN | INFERRED
+    source: str = "VerificationRunner"
+    confidence: float = 1.0
+    status: str = "CONFIRMED"  # CONFIRMED | DISPUTED | REFUTED | UNVERIFIED
+    created_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

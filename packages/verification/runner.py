@@ -19,6 +19,7 @@ from packages.project_graph.models import (
 )
 from packages.project_graph.store import ProjectGraph
 from .api_runner import APIRunnerVerifier
+from .browser_lab import BrowserLaboratory
 from .test_runner import TestRunnerVerifier
 from .ui_verifier import UIVerifier
 
@@ -31,11 +32,15 @@ class VerificationRunner:
         self.ui_verifier = UIVerifier(root, evidence_store, graph)
         self.api_runner = APIRunnerVerifier(root, evidence_store, graph)
         self.test_runner = TestRunnerVerifier(root, evidence_store, graph)
+        self.browser_lab = BrowserLaboratory(root, evidence_store, graph)
 
     def run_all(self) -> dict:
         t0 = time.time()
         tasks_completed = 0
         tasks_failed = 0
+
+        # 0. Check & Run Browser Lab
+        browser_report = self.browser_lab.run_browser_audit()
 
         # 1. Verify UI Elements (Static Handler + Incomplete States + Browser Gap)
         ui_nodes = self.graph.nodes_of_type(NodeType.UI_ELEMENT)
@@ -82,7 +87,7 @@ class VerificationRunner:
                 else:
                     tasks_failed += 1
 
-        # 4. Verify Database Entities (Schema Constraints & Field Sensitivity)
+        # 4. Verify Database Entities (Schema Model & Static Constraints)
         db_nodes = self.graph.nodes_of_type(NodeType.DATABASE_ENTITY)
         for node in db_nodes:
             task_id = f"TASK-{node.id}"
@@ -94,13 +99,13 @@ class VerificationRunner:
             ev = self.evidence_store.add(
                 evidence_type=EvidenceType.DATABASE_OBSERVATION,
                 target_id=node.id,
-                summary=f"Database entity '{node.name}' schema model and constraints validated.",
+                summary=f"Database entity '{node.name}' schema model and constraints statically parsed.",
                 source_location=f"{node.metadata.get('file', '')}:{node.metadata.get('line', 1)}",
                 payload={"model": node.name, "orm": node.metadata.get("orm")},
             )
             node.static_status = AuditStatus.VERIFIED
-            node.runtime_status = AuditStatus.UNVERIFIED
-            node.refresh_audit_status()
+            node.runtime_status = AuditStatus.NOT_APPLICABLE
+            node.refresh_audit_status(checks)
 
             if task_id in self.graph.audit_tasks:
                 task = self.graph.audit_tasks[task_id]
@@ -113,7 +118,6 @@ class VerificationRunner:
             task_id = f"TASK-{ext.id}"
             checks = self.graph.get_checks_for_target(ext.id)
             timeout_check = next((c for c in checks if "TIMEOUT" in c.id), None)
-            # Check if timeout is unhandled
             timeout_check_passed = ext.metadata.get("timeout_configured", False)
             if timeout_check:
                 timeout_check.status = CheckStatus.PASSED if timeout_check_passed else CheckStatus.FAILED
@@ -121,8 +125,8 @@ class VerificationRunner:
                     timeout_check.unverified_reason = "No explicit client timeout configured in external API invocation."
 
             ext.static_status = AuditStatus.VERIFIED if timeout_check_passed else AuditStatus.FAILED
-            ext.runtime_status = AuditStatus.UNVERIFIED
-            ext.refresh_audit_status()
+            ext.runtime_status = AuditStatus.NOT_APPLICABLE
+            ext.refresh_audit_status(checks)
 
             if task_id in self.graph.audit_tasks:
                 task = self.graph.audit_tasks[task_id]
@@ -140,10 +144,10 @@ class VerificationRunner:
             + self.graph.nodes_of_type(NodeType.FUNCTION)
             + self.graph.nodes_of_type(NodeType.CLASS)
         ):
-            # Files and packages discovered via AST are statically proven; runtime tier is N/A
+            n_checks = self.graph.get_checks_for_target(n.id)
             n.static_status = AuditStatus.VERIFIED
             n.runtime_status = AuditStatus.NOT_APPLICABLE
-            n.refresh_audit_status()
+            n.refresh_audit_status(n_checks)
 
         # 7. Check Features & Requirements Traceability
         for feat in self.graph.nodes_of_type(NodeType.FEATURE):
@@ -155,17 +159,18 @@ class VerificationRunner:
             feat_status = AuditStatus.FAILED if has_failed_children else AuditStatus.VERIFIED
             feat.static_status = feat_status
             feat.runtime_status = AuditStatus.UNVERIFIED
-            feat.refresh_audit_status()
 
             checks = self.graph.get_checks_for_target(feat.id)
             trace_check = next((c for c in checks if "TRACEABILITY" in c.id), None)
             if trace_check:
                 trace_check.status = CheckStatus.PASSED if feat_status == AuditStatus.VERIFIED else CheckStatus.FAILED
 
+            feat.refresh_audit_status(checks)
+
             if task_id in self.graph.audit_tasks:
                 task = self.graph.audit_tasks[task_id]
-                task.status = "COMPLETED" if feat_status == AuditStatus.VERIFIED else "FAILED"
-                if feat_status == AuditStatus.VERIFIED:
+                task.status = "COMPLETED" if feat.audit_status == AuditStatus.VERIFIED else "FAILED"
+                if feat.audit_status == AuditStatus.VERIFIED:
                     tasks_completed += 1
                 else:
                     tasks_failed += 1
@@ -177,8 +182,9 @@ class VerificationRunner:
                 req.static_status = AuditStatus.FAILED
             else:
                 req.static_status = AuditStatus.VERIFIED
-            req.runtime_status = AuditStatus.UNVERIFIED
-            req.refresh_audit_status()
+            req.runtime_status = AuditStatus.NOT_APPLICABLE
+            req_checks = self.graph.get_checks_for_target(req.id)
+            req.refresh_audit_status(req_checks)
 
         elapsed = time.time() - t0
         return {
@@ -186,5 +192,6 @@ class VerificationRunner:
             "tasks_failed": tasks_failed,
             "total_tasks": len(self.graph.audit_tasks),
             "evidence_count": len(self.evidence_store.all()),
+            "browser_report": browser_report,
             "elapsed_seconds": round(elapsed, 3),
         }

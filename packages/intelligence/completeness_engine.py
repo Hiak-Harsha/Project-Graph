@@ -40,13 +40,36 @@ class CompletenessEngine:
 
         report = self.graph.completeness_report()
         report["by_category"] = nodes_by_type
+
+        # Multi-dimensional audit dimensions
+        check_total = report.get("total_check_obligations", 0)
+        check_resolved = report.get("passed_check_obligations", 0) + report.get("failed_check_obligations", 0)
+        check_coverage = round((check_resolved / check_total * 100), 1) if check_total > 0 else 0.0
+
+        static_cov = report.get("static_coverage_pct", 0.0)
+        runtime_cov = report.get("runtime_coverage_pct", 0.0)
+
+        # Composite Audit Completeness Index
+        audit_completeness = round(
+            (100.0 * 0.20 + check_coverage * 0.40 + static_cov * 0.20 + runtime_cov * 0.20),
+            1,
+        )
+
+        report["dimensions"] = {
+            "discovery_coverage_pct": 100.0,
+            "check_coverage_pct": check_coverage,
+            "static_coverage_pct": static_cov,
+            "runtime_coverage_pct": runtime_cov,
+            "audit_completeness_pct": audit_completeness,
+        }
+
         report["check_obligations"] = {
-            "total": report.get("total_check_obligations", 0),
+            "total": check_total,
             "passed": report.get("passed_check_obligations", 0),
             "failed": report.get("failed_check_obligations", 0),
             "unverified": report.get("unverified_check_obligations", 0),
-            "check_coverage_pct": report.get("check_coverage_pct", 0.0),
-            "static_coverage_pct": report.get("static_coverage_pct", 0.0),
-            "runtime_coverage_pct": report.get("runtime_coverage_pct", 0.0),
+            "check_coverage_pct": check_coverage,
+            "static_coverage_pct": static_cov,
+            "runtime_coverage_pct": runtime_cov,
         }
         return report
