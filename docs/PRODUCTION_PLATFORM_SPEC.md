@@ -158,6 +158,11 @@ by copying it to `runtime-contract.json` and filling in its real, non-secret
 start command and health endpoint. The supervisor rejects shell command
 strings, invalid ports, unbounded resources and undeclared runtime starts.
 
+`api-contract.example.json` and `browser-contract.example.json` define the
+only requests and UI interactions the runtime agents may execute. A contract
+must name expected statuses/selectors and observable effects; no route,
+payload, selector or identity is inferred at execution time.
+
 ### Milestone 5 — Browser Lab and Runtime Reconciliation
 
 Add Playwright image, route inventory, DOM matching, click/form flows, network

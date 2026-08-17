@@ -1,0 +1,16 @@
+{
+  "flows": [
+    {
+      "id": "dashboard-generate-resume",
+      "path": "/dashboard",
+      "timeout_ms": 15000,
+      "steps": [
+        {
+          "target_id": "UI-0001",
+          "selector": "button:has-text('Generate Resume')",
+          "expect": {"url_changes": false}
+        }
+      ]
+    }
+  ]
+}

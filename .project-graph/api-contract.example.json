@@ -1,0 +1,9 @@
+{
+  "endpoints": {
+    "GET /health": {
+      "path": "/health",
+      "expected_statuses": [200],
+      "headers": {}
+    }
+  }
+}

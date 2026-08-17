@@ -9,6 +9,7 @@ command, ports, credentials, or network permissions.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import shutil
 import subprocess
@@ -106,6 +107,7 @@ class SandboxExecution:
     container_name: str | None = None
     network_name: str | None = None
     health_url: str | None = None
+    base_url: str | None = None
     health_status: int | None = None
     commands: list[list[str]] = field(default_factory=list)
     logs: str = ""
@@ -198,6 +200,7 @@ class DockerSandboxSupervisor:
             return execution
         host_mapping = port_result.stdout.strip().splitlines()[0].strip()
         execution.health_url = f"http://{host_mapping}{contract.healthcheck_path}"
+        execution.base_url = f"http://{host_mapping}"
         deadline = time.monotonic() + contract.startup_timeout_seconds
         while time.monotonic() < deadline:
             try:
@@ -230,7 +233,7 @@ class DockerSandboxSupervisor:
         result = self._executor(command, root, timeout)
         # A bounded tail remains useful evidence while avoiding uncontrolled log
         # growth or accidental full-secret persistence.
-        execution.logs += (result.stdout + result.stderr)[-4000:]
+        execution.logs += self._redact_text((result.stdout + result.stderr)[-4000:])
         return result
 
     @staticmethod
@@ -246,3 +249,12 @@ class DockerSandboxSupervisor:
                 out.append(item)
                 redact_next = item == "--env"
         return out
+
+    @staticmethod
+    def _redact_text(text: str) -> str:
+        """Remove common key=value secrets from retained Docker output."""
+        return re.sub(
+            r"(?im)\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|KEY))\s*[:=]\s*[^\s,;]+",
+            r"\1=[REDACTED]",
+            text,
+        )

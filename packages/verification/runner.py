@@ -18,6 +18,7 @@ from packages.project_graph.models import (
     NodeType,
 )
 from packages.project_graph.store import ProjectGraph
+from packages.sandbox import DockerSandboxSupervisor
 from .api_runner import APIRunnerVerifier
 from .browser_lab import BrowserLaboratory
 from .test_runner import TestRunnerVerifier
@@ -33,14 +34,23 @@ class VerificationRunner:
         self.api_runner = APIRunnerVerifier(root, evidence_store, graph)
         self.test_runner = TestRunnerVerifier(root, evidence_store, graph)
         self.browser_lab = BrowserLaboratory(root, evidence_store, graph)
+        self.sandbox = DockerSandboxSupervisor()
 
     def run_all(self) -> dict:
         t0 = time.time()
         tasks_completed = 0
         tasks_failed = 0
 
-        # 0. Check & Run Browser Lab
-        browser_report = self.browser_lab.run_browser_audit()
+        # 0. Start the only permitted runtime target. No target repository is
+        # imported or launched on the control-plane host.
+        sandbox_execution = self.sandbox.start(self.root)
+        sandbox_ev = self.evidence_store.add(
+            EvidenceType.SANDBOX_EXECUTION, "SANDBOX-RUNTIME",
+            f"Sandbox execution {sandbox_execution.execution_id}: {sandbox_execution.status}.",
+            payload=sandbox_execution.to_dict(), execution_id=sandbox_execution.execution_id, producer="DockerSandboxSupervisor",
+        )
+        if sandbox_execution.status == "HEALTHY":
+            self.api_runner.configure_sandbox_target(sandbox_execution.base_url, sandbox_execution.execution_id)
 
         # 1. Verify UI Elements (Static Handler + Incomplete States + Browser Gap)
         ui_nodes = self.graph.nodes_of_type(NodeType.UI_ELEMENT)
@@ -56,6 +66,10 @@ class VerificationRunner:
                     tasks_completed += 1
                 else:
                     tasks_failed += 1
+
+        # 1b. Browser flows run after static UI checks so browser evidence can
+        # update the same click/network obligations rather than be overwritten.
+        browser_report = self.browser_lab.run_browser_audit(sandbox_execution.base_url if sandbox_execution.status == "HEALTHY" else None, sandbox_execution.execution_id)
 
         # 2. Verify API Endpoints (Static Route & Auth + Dynamic HTTP Dispatch & BOLA)
         api_nodes = self.graph.nodes_of_type(NodeType.API_ENDPOINT)
@@ -186,6 +200,9 @@ class VerificationRunner:
             req_checks = self.graph.get_checks_for_target(req.id)
             req.refresh_audit_status(req_checks)
 
+        if sandbox_execution.status == "HEALTHY":
+            self.sandbox.teardown(sandbox_execution, self.root)
+
         elapsed = time.time() - t0
         return {
             "tasks_completed": tasks_completed,
@@ -193,5 +210,7 @@ class VerificationRunner:
             "total_tasks": len(self.graph.audit_tasks),
             "evidence_count": len(self.evidence_store.all()),
             "browser_report": browser_report,
+            "sandbox_execution": sandbox_execution.to_dict(),
+            "sandbox_evidence_id": sandbox_ev.id,
             "elapsed_seconds": round(elapsed, 3),
         }

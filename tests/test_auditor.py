@@ -210,6 +210,14 @@ class TestAuditorPlatform(unittest.TestCase):
         self.assertEqual(execution.status, "BLOCKED")
         self.assertIn("runtime-contract", execution.reason)
 
+    def test_runtime_agents_require_healthy_sandbox_and_emit_provenance(self):
+        """API/Browser adapters receive only a healthy Docker target, never host state."""
+        graph, evidence_store, summary = run_full_audit(FIXTURE_PATH)
+        execution = summary["verification_stats"]["sandbox_execution"]
+        self.assertEqual(execution["status"], "BLOCKED")
+        self.assertEqual(summary["verification_stats"]["browser_report"]["status"], "BLOCKED")
+        self.assertTrue(any(e.evidence_type == EvidenceType.SANDBOX_EXECUTION for e in evidence_store.all()))
+
 
 if __name__ == "__main__":
     unittest.main()
