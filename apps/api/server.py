@@ -55,10 +55,10 @@ def validate_safe_repo_path(raw_path: str) -> tuple[bool, Optional[Path], str]:
     clean_posix = str(raw_path).strip().lower().replace("\\", "/")
 
     # Cross-platform check before resolve()
-    if clean_posix in ("/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin") or \
+    if clean_posix in ("/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin", "/home", "/users") or \
        clean_posix.startswith(("/etc/", "/proc/", "/sys/", "/dev/", "/root/")) or \
-       clean_raw in ("c:\\", "c:", "c:\\windows", "c:\\users", "c:\\program files") or \
-       clean_raw.startswith(("c:\\windows", "c:\\users\\", "\\\\", "..")):
+       clean_raw in ("c:\\", "c:", "c:\\windows", "c:\\users", "c:\\users\\", "c:\\program files") or \
+       clean_raw.startswith(("c:\\windows", "\\\\", "..")):
         return False, None, "Access to root or system directory is blocked for security."
 
     try:
