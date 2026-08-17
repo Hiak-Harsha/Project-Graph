@@ -92,9 +92,11 @@ class FindingCategory(str, Enum):
 class ExecutionTier(str, Enum):
     STATIC_AST = "STATIC_AST"
     STATIC_PATTERN = "STATIC_PATTERN"
+    STATIC_GRAPH = "STATIC_GRAPH"
     TEST_RUNNER = "TEST_RUNNER"
     RUNTIME_HTTP = "RUNTIME_HTTP"
     RUNTIME_BROWSER = "RUNTIME_BROWSER"
+    RUNTIME_TEST = "RUNTIME_TEST"
     MODEL_REASONING = "MODEL_REASONING"
 
 
@@ -132,6 +134,8 @@ class AuditCheck:
     timeout: Optional[int] = None
     risk_level: str = "MEDIUM"
     destructive: bool = False
+    dependencies: list[str] = field(default_factory=list)
+    capability_requirements: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

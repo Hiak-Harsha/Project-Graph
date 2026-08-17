@@ -18,6 +18,9 @@ class AdversarialReviewer:
         self.graph = graph
         self.evidence_store = evidence_store
 
+    def review(self) -> dict[str, int]:
+        return self.review_all()
+
     def review_all(self) -> dict[str, int]:
         confirmed_count = 0
         downgraded_count = 0

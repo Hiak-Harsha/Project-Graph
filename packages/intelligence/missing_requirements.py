@@ -25,6 +25,9 @@ class MissingRequirementsEngine:
         self.graph = graph
         self.evidence_store = evidence_store
 
+    def analyze(self) -> list[Finding]:
+        return self.discover_missing_requirements()
+
     def discover_missing_requirements(self) -> list[Finding]:
         findings: list[Finding] = []
         finding_idx = len(self.graph.findings) + 1

@@ -5,7 +5,7 @@ from .cross_check import CrossCheckEngine
 from .judge import Judge
 from .missing_requirements import MissingRequirementsEngine
 from .system_understanding import SystemUnderstandingEngine
-from .verdict_engine import VerdictEngine
+from .verdict_engine import CertificationState, VerdictEngine
 
 __all__ = [
     "SystemUnderstandingEngine",
@@ -16,4 +16,5 @@ __all__ = [
     "Judge",
     "CompletenessEngine",
     "VerdictEngine",
+    "CertificationState",
 ]

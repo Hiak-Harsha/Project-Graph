@@ -47,3 +47,7 @@ class SystemUnderstandingEngine:
             "total_endpoints": len(apis),
             "primary_workflows": workflows,
         }
+
+    def analyze(self, fingerprint: Any = None) -> dict:
+        return self.synthesize()
+
