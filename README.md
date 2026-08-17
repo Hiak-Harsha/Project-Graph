@@ -212,5 +212,15 @@ The repository includes a benchmark test app (`tests/fixtures/sample_career_app`
 
 ---
 
+## 🧭 Production Roadmap and Agent Model
+
+The complete product specification, agent boundaries, acceptance gates and
+milestone roadmap are in [docs/PRODUCTION_PLATFORM_SPEC.md](docs/PRODUCTION_PLATFORM_SPEC.md).
+The control plane exposes the canonical agent registry at
+`GET /api/platform/agents`. Agents propose bounded work; they do not directly
+declare audit truth or write a release verdict.
+
+---
+
 ## 📄 License
 MIT License. Developed with Antigravity.

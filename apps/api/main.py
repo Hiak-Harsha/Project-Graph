@@ -20,6 +20,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
 from workers.audit_orchestrator import run_full_audit
+from packages.orchestration import AgentRegistry
 
 app = FastAPI(
     title="AI Production Audit Platform API",
@@ -64,6 +65,7 @@ app.add_middleware(
 LATEST_GRAPH = None
 LATEST_EVIDENCE_STORE = None
 LATEST_SUMMARY = None
+AGENT_REGISTRY = AgentRegistry()
 
 WEB_DIR = ROOT_DIR / "apps" / "web"
 FIXTURE_DEFAULT_REPO = ROOT_DIR / "tests" / "fixtures" / "sample_career_app"
@@ -135,6 +137,12 @@ def get_coverage():
     if not LATEST_SUMMARY:
         raise HTTPException(status_code=404, detail="No audit has been run yet.")
     return LATEST_SUMMARY.get("completeness", {})
+
+
+@app.get("/api/platform/agents")
+def get_platform_agents():
+    """Expose bounded agent contracts; agents are not autonomous write access."""
+    return [agent.to_dict() for agent in AGENT_REGISTRY.all()]
 
 
 # Mount static assets for web UI

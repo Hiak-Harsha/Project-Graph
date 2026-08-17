@@ -26,6 +26,7 @@ from packages.discovery import (
 )
 from packages.evidence import EvidenceStore, EvidenceType, reset_evidence_counter
 from packages.intelligence import CompletenessEngine, CrossCheckEngine, VerdictEngine
+from packages.orchestration import AgentOutput, AgentProposal, AgentRegistry
 from packages.project_graph.models import CheckStatus, NodeType, reset_id_counters
 from packages.project_graph.store import ProjectGraph
 from packages.verification import VerificationRunner
@@ -138,6 +139,23 @@ class TestAuditorPlatform(unittest.TestCase):
         self.assertIn("no synthetic identities", bola_runtime.unverified_reason)
         self.assertFalse(any(e.evidence_type == EvidenceType.AUTH_BOUNDARY_TEST for e in evidence_store.find_by_target(endpoint.id)))
         self.assertGreater(summary["completeness"]["check_obligations"]["blocked"], 0)
+
+    def test_agent_registry_requires_evidence_for_findings(self):
+        """Reasoning agents can propose findings but cannot create evidence-free truth."""
+        registry = AgentRegistry()
+        self.assertGreaterEqual(len(registry.all()), 14)
+
+        unsupported = AgentProposal(
+            agent_id="AGENT-SECURITY", output=AgentOutput.FINDING_PROPOSAL,
+            target_ids=["API-0001"], summary="Unproven security assertion", confidence=0.8,
+        )
+        self.assertFalse(registry.validate_proposal(unsupported)[0])
+
+        supported = AgentProposal(
+            agent_id="AGENT-SECURITY", output=AgentOutput.FINDING_PROPOSAL,
+            target_ids=["API-0001"], summary="Evidence-backed security proposal", evidence_ids=["EV-00001"], confidence=0.8,
+        )
+        self.assertTrue(registry.validate_proposal(supported)[0])
 
 
 if __name__ == "__main__":

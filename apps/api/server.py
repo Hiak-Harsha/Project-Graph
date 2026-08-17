@@ -16,6 +16,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 
 from workers.audit_orchestrator import run_full_audit
+from packages.orchestration import AgentRegistry
 
 WEB_DIR = ROOT_DIR / "apps" / "web"
 FIXTURE_DEFAULT_REPO = ROOT_DIR / "tests" / "fixtures" / "sample_career_app"
@@ -23,6 +24,7 @@ FIXTURE_DEFAULT_REPO = ROOT_DIR / "tests" / "fixtures" / "sample_career_app"
 LATEST_GRAPH = None
 LATEST_EVIDENCE_STORE = None
 LATEST_SUMMARY = None
+AGENT_REGISTRY = AgentRegistry()
 
 
 def ensure_audit_run():
@@ -124,6 +126,8 @@ class AuditRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/audits/capabilities":
             from packages.sandbox.environment import detect_environment_capabilities
             self.send_json(detect_environment_capabilities().to_dict())
+        elif path == "/api/platform/agents":
+            self.send_json([agent.to_dict() for agent in AGENT_REGISTRY.all()])
         elif path == "/api/audits/coverage":
             self.send_json(LATEST_SUMMARY.get("completeness", {}))
         else:
