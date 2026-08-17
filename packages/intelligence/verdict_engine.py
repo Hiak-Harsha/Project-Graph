@@ -65,13 +65,19 @@ class VerdictEngine:
         gates: list[dict[str, Any]] = []
 
         # Gate 1: Discovery Completeness
-        g1_pass = discovery_complete and (accounted_entities >= 10 if discovered_entities >= 10 else True)
+        file_universe = self.graph.metadata.get("file_discovery_universe", {})
+        is_truncated = bool(file_universe.get("discovery_truncated", False))
+        g1_pass = discovery_complete and (accounted_entities >= 10 if discovered_entities >= 10 else True) and not is_truncated
+        g1_details = f"{accounted_entities}/{discovered_entities} entities accounted for."
+        if is_truncated:
+            g1_details += f" (Truncated: {file_universe.get('files_skipped_due_to_limit', 0)} files skipped due to limit)."
+
         gates.append({
             "gate_id": "GATE-1-DISCOVERY",
             "name": "Discovery Completeness Gate",
-            "description": "100% of discovered system entities must be accounted for without silent omission.",
+            "description": "100% of discovered system entities must be accounted for without silent omission or truncation.",
             "passed": g1_pass,
-            "details": f"{accounted_entities}/{discovered_entities} entities accounted for.",
+            "details": g1_details,
         })
 
         # Gate 2: Critical Check Resolution
@@ -106,15 +112,15 @@ class VerdictEngine:
         })
 
         # Gate 5: Evidence Provenance & Cryptographic Backing
-        unbacked_findings = [
-            f.id for f in findings
-            if f.status == "CONFIRMED" and not f.evidence_ids
-        ]
-        g5_pass = (len(unbacked_findings) == 0) and (len(findings) == 0 or any(len(f.evidence_ids) > 0 for f in findings))
+        confirmed_findings = [f for f in findings if f.status == "CONFIRMED"]
+        unbacked_findings = [f.id for f in confirmed_findings if not f.evidence_ids]
+        
+        # Verify that all confirmed findings have non-empty SHA-256 evidence records
+        g5_pass = (len(unbacked_findings) == 0) and (len(findings) == 0 or len(confirmed_findings) > 0)
         gates.append({
             "gate_id": "GATE-5-EVIDENCE-PROVENANCE",
             "name": "Evidence Provenance Invariant Gate",
-            "description": "Every material finding must be backed by tamper-evident cryptographic evidence.",
+            "description": "Every confirmed finding must be backed by verified SHA-256 evidence records.",
             "passed": g5_pass,
             "details": "All findings backed by verified SHA-256 evidence records." if g5_pass else f"Unbacked findings discovered: {', '.join(unbacked_findings)}.",
         })
@@ -130,28 +136,37 @@ class VerdictEngine:
             "details": f"{len(missing_req_findings)} advertised features missing from implementation.",
         })
 
-        # Gate 7: Reproducibility Bundle
+        # Gate 7: Deterministic Reproducibility Bundle
         repro_data = self.graph.metadata.get("reproducibility", {})
-        has_commit = bool(repro_data.get("commit_sha") and repro_data.get("commit_sha") != "HEAD")
+        has_revision = bool(repro_data.get("revision_id") or repro_data.get("commit_sha"))
         has_merkle = bool(repro_data.get("file_inventory_hash"))
         has_replay = bool(repro_data.get("replay_token"))
-        # If metadata not yet populated during intermediate compute, pass if graph has valid structure
-        g7_pass = (has_commit and has_merkle and has_replay) if repro_data else True
+        # Strict rule: Missing reproducibility data FAILS Gate 7
+        g7_pass = bool(repro_data) and has_revision and has_merkle and has_replay
+        
+        merkle_digest = repro_data.get("file_inventory_hash", "")[:16] if has_merkle else ""
+        rev_type = repro_data.get("revision_type", "REVISION")
+        g7_details = (
+            f"Deterministic Merkle hash: {merkle_digest} ({rev_type}: {repro_data.get('revision_id', '')[:8]})."
+            if g7_pass
+            else "Missing or incomplete audit reproducibility metadata."
+        )
+
         gates.append({
             "gate_id": "GATE-7-REPRODUCIBILITY",
             "name": "Deterministic Reproducibility Gate",
-            "description": "Audit manifest contains commit SHA, file Merkle digest, and replayable token.",
+            "description": "Audit manifest contains verified revision ID, file Merkle digest, and replayable token.",
             "passed": g7_pass,
-            "details": f"Deterministic Merkle hash: {repro_data.get('file_inventory_hash', 'MERKLE_READY')[:16]}." if g7_pass else "Missing commit SHA or inventory Merkle digest.",
+            "details": g7_details,
         })
 
         # Evaluate Certification State
         gate_failures = [g["details"] for g in gates if not g["passed"]]
 
-        if not discovery_complete or discovered_entities == 0:
-            cert_state = CertificationState.NOT_AUDITABLE
-            verdict_badge = "NOT_AUDITABLE"
-            summary_statement = "Repository discovery is incomplete or obstructed."
+        if not discovery_complete or discovered_entities == 0 or is_truncated:
+            cert_state = CertificationState.NOT_AUDITABLE if (not discovery_complete or discovered_entities == 0) else CertificationState.PARTIALLY_AUDITED
+            verdict_badge = "NOT_AUDITABLE" if cert_state == CertificationState.NOT_AUDITABLE else "PARTIAL"
+            summary_statement = "Repository discovery is incomplete or truncated." if is_truncated else "Repository discovery is incomplete or obstructed."
         elif critical_count > 0 or high_count >= 2 or len(missing_req_findings) > 0:
             cert_state = CertificationState.AUDITED_NOT_PRODUCTION_READY
             verdict_badge = "FAILED"

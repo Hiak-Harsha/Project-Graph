@@ -4,16 +4,27 @@ Dynamic Graph-Driven User Flow & State-Machine Engine (spec Milestone 2 §12)
 Synthesizes and audits end-to-end user journeys purely from Project Graph topology:
 PAGE -> UI_ELEMENT -> (HANDLED_BY / SUBMITS_TO) -> API_ENDPOINT -> (WRITES_TO / READS_FROM) -> DATABASE_ENTITY
 
+Strictly distinguishes DISCOVERED / STATICALLY_SUPPORTED from RUNTIME_VERIFIED.
 Contains ZERO hardcoded benchmark strings or domain assumptions.
 """
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from packages.project_graph.models import AuditStatus, CheckStatus, EdgeType, GraphNode, NodeType
 from packages.project_graph.store import ProjectGraph
+
+
+class FlowStepStatus(str, Enum):
+    DISCOVERED = "DISCOVERED"
+    STATICALLY_SUPPORTED = "STATICALLY_SUPPORTED"
+    RUNTIME_VERIFIED = "RUNTIME_VERIFIED"
+    FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
+    UNVERIFIED = "UNVERIFIED"
 
 
 @dataclass
@@ -25,8 +36,13 @@ class FlowStep:
     action_type: str  # NAVIGATE | UI_INTERACTION | API_DISPATCH | DB_PERSISTENCE
     expected_state: str
     observed_state: str = "UNVERIFIED"
-    status: str = "UNVERIFIED"
+    status: FlowStepStatus = FlowStepStatus.UNVERIFIED
     failure_detail: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["status"] = self.status.value if hasattr(self.status, "value") else str(self.status)
+        return d
 
 
 @dataclass
@@ -42,7 +58,7 @@ class UserFlowAudit:
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["overall_status"] = self.overall_status.value
-        d["steps"] = [asdict(s) for s in self.steps]
+        d["steps"] = [s.to_dict() for s in self.steps]
         return d
 
 
@@ -66,7 +82,7 @@ class UserFlowEngine:
             steps: list[FlowStep] = []
             step_num = 1
 
-            # Step 1: Render Enclosing Component / Page
+            # Step 1: Render Enclosing Component / Page (Static Discovery)
             file_rel = ui_node.metadata.get("file", "unknown")
             steps.append(
                 FlowStep(
@@ -76,8 +92,8 @@ class UserFlowEngine:
                     target_node_type="UI_ELEMENT",
                     action_type="NAVIGATE",
                     expected_state="COMPONENT_MOUNTED",
-                    observed_state="STATIC_DISCOVERED",
-                    status="PASSED",
+                    observed_state="STATIC_COMPONENT_DISCOVERED",
+                    status=FlowStepStatus.DISCOVERED,
                 )
             )
             step_num += 1
@@ -97,7 +113,7 @@ class UserFlowEngine:
                     action_type="UI_INTERACTION",
                     expected_state="HANDLER_EXECUTED",
                     observed_state="DEAD_HANDLER_DETECTED" if ui_step_failed else "HANDLER_ATTACHED",
-                    status="FAILED" if ui_step_failed else "PASSED",
+                    status=FlowStepStatus.FAILED if ui_step_failed else FlowStepStatus.STATICALLY_SUPPORTED,
                     failure_detail=f"Actionable control '{ui_node.name}' has no execution handler in {file_rel}" if ui_step_failed else "",
                 )
             )
@@ -122,7 +138,7 @@ class UserFlowEngine:
                         action_type="API_DISPATCH",
                         expected_state="HTTP_200_SUCCESS",
                         observed_state="ENDPOINT_STATIC_REGISTERED",
-                        status="FAILED" if api_failed else "PASSED",
+                        status=FlowStepStatus.FAILED if api_failed else FlowStepStatus.STATICALLY_SUPPORTED,
                         failure_detail=f"API endpoint '{api.name}' failed verification checks." if api_failed else "",
                     )
                 )
@@ -141,15 +157,22 @@ class UserFlowEngine:
                                 target_node_type="DATABASE_ENTITY",
                                 action_type="DB_PERSISTENCE",
                                 expected_state="DB_RECORD_PERSISTED",
-                                observed_state="STATIC_SCHEMA_DISCOVERED",
-                                status="PASSED",
+                                observed_state="STATIC_SCHEMA_DISCOVERED (Unexecuted at runtime)",
+                                status=FlowStepStatus.UNVERIFIED,
                             )
                         )
                         step_num += 1
 
-            # Determine overall flow health
-            broken_step = next((s.step_number for s in steps if s.status == "FAILED"), None)
-            overall_status = AuditStatus.FAILED if broken_step is not None else AuditStatus.VERIFIED
+            # Determine overall flow health honestly
+            broken_step = next((s.step_number for s in steps if s.status == FlowStepStatus.FAILED), None)
+            if broken_step is not None:
+                overall_status = AuditStatus.FAILED
+            elif all(s.status == FlowStepStatus.RUNTIME_VERIFIED for s in steps):
+                overall_status = AuditStatus.VERIFIED
+            else:
+                # Statically supported or partially discovered without runtime proof
+                overall_status = AuditStatus.UNVERIFIED
+
             fail_step = next((s for s in steps if s.step_number == broken_step), None) if broken_step else None
 
             clean_flow_name = ui_node.name.replace("BUTTON:", "").replace("LINK:", "").replace("FORM:", "").strip()

@@ -103,6 +103,16 @@ class ExecutionTier(str, Enum):
     MODEL_REASONING = "MODEL_REASONING"
 
 
+class EvidenceCapability(str, Enum):
+    L0_NOT_OBSERVED = "L0_NOT_OBSERVED"
+    L1_STATIC_DISCOVERY = "L1_STATIC_DISCOVERY"
+    L2_STATIC_ANALYSIS = "L2_STATIC_ANALYSIS"
+    L3_TEST_OBSERVED = "L3_TEST_OBSERVED"
+    L4_RUNTIME_OBSERVED = "L4_RUNTIME_OBSERVED"
+    L5_RUNTIME_SIDE_EFFECT_VERIFIED = "L5_RUNTIME_SIDE_EFFECT_VERIFIED"
+    L6_RUNTIME_ADVERSARIAL_VERIFIED = "L6_RUNTIME_ADVERSARIAL_VERIFIED"
+
+
 class CheckStatus(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
@@ -122,21 +132,22 @@ class AuditCheck:
     name: str
     description: str
     execution_tier: ExecutionTier
-    status: CheckStatus = CheckStatus.UNVERIFIED
+    status: CheckStatus = CheckStatus.PENDING
     required: bool = True
     evidence_ids: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
-    unverified_reason: Optional[str] = None
-    execution_method: str = "STATIC"
+    unverified_reason: str = ""
+    execution_method: str = ""
     preconditions: list[str] = field(default_factory=list)
     inputs: dict[str, Any] = field(default_factory=dict)
     expected_observations: list[str] = field(default_factory=list)
     success_conditions: list[str] = field(default_factory=list)
     failure_conditions: list[str] = field(default_factory=list)
     evidence_requirements: list[str] = field(default_factory=list)
-    timeout: Optional[int] = None
-    risk_level: str = "MEDIUM"
+    timeout: int = 30
+    risk_level: str = "READ_ONLY"
     destructive: bool = False
+    capability_level: EvidenceCapability = EvidenceCapability.L1_STATIC_DISCOVERY
     dependencies: list[str] = field(default_factory=list)
     capability_requirements: list[str] = field(default_factory=list)
 

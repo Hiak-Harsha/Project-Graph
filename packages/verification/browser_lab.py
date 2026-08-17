@@ -73,7 +73,12 @@ class BrowserLaboratory:
                             artifact_bytes=screenshot, mime_type="image/png", execution_id=execution_id, producer="BrowserLaboratory",
                         )
                         evidence_ids.append(ev.id)
-                        self._mark_runtime_step(step["target_id"], ev.id, bool(expectation))
+                        self._mark_runtime_step(
+                            target_id=step["target_id"],
+                            evidence_id=ev.id,
+                            effect_verified=bool(expectation and (expectation.get("url_contains") or expectation.get("url_changes"))),
+                            network_verified=bool(network),
+                        )
 
                 trace = self.evidence_store.add(
                     EvidenceType.BROWSER_TRACE, "BROWSER-LAB",
@@ -110,14 +115,28 @@ class BrowserLaboratory:
         except (OSError, json.JSONDecodeError):
             return None
 
-    def _mark_runtime_step(self, target_id: str, evidence_id: str, has_expectation: bool) -> None:
+    def _mark_runtime_step(self, target_id: str, evidence_id: str, effect_verified: bool, network_verified: bool) -> None:
         for check in self.graph.get_checks_for_target(target_id):
             if "CLICK" in check.id:
+                # Click executed proves interaction was triggered in DOM
                 check.status = CheckStatus.PASSED
                 check.evidence_ids.append(evidence_id)
-            elif "NETWORK-DISPATCH" in check.id and has_expectation:
-                check.status = CheckStatus.PASSED
-                check.evidence_ids.append(evidence_id)
+            elif "EXPECTED-EFFECT" in check.id or "DOWNLOAD" in check.id or "NAVIGATION" in check.id:
+                # Observable outcome required for feature success
+                if effect_verified:
+                    check.status = CheckStatus.PASSED
+                    check.evidence_ids.append(evidence_id)
+                else:
+                    check.status = CheckStatus.UNVERIFIED
+                    check.unverified_reason = "Click executed, but expected outcome/download/navigation was unverified."
+            elif "NETWORK-DISPATCH" in check.id:
+                if network_verified:
+                    check.status = CheckStatus.PASSED
+                    check.evidence_ids.append(evidence_id)
+                else:
+                    check.status = CheckStatus.UNVERIFIED
+                    check.unverified_reason = "No outbound network dispatch captured during interaction."
+
         node = self.graph.get_node(target_id)
         if node:
             checks = self.graph.get_checks_for_target(target_id)

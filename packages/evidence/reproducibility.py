@@ -3,6 +3,7 @@ Audit Reproducibility & Provenance Manifest (spec Milestone 3 §28)
 
 Generates tamper-evident, cryptographically verifiable audit bundles that guarantee
 exact execution replayability across commit SHAs, container images, and contract versions.
+Honest revision semantics: distinguishes GIT_COMMIT from CONTENT_DIGEST snapshots.
 """
 from __future__ import annotations
 
@@ -21,16 +22,23 @@ from packages.evidence.store import EvidenceStore
 class AuditReproducibilityManifest:
     audit_id: str
     timestamp_iso: str
-    commit_sha: str
+    revision_id: str
+    revision_type: str  # "GIT_COMMIT" | "CONTENT_DIGEST"
     target_repo_path: str
     file_inventory_hash: str
     runtime_contract_hash: str
     evidence_vault_digest: str
     certification_state: str
+    commit_sha: str = ""  # Backward-compatible alias for revision_id
+    revision_notes: str = ""
     tool_version: str = "2.0.0-truth"
     model_version: str = "deterministic-rule-engine"
     evidence_count: int = 0
     replay_token: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.commit_sha:
+            self.commit_sha = self.revision_id
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -40,8 +48,12 @@ class ReproducibilityEngine:
     def __init__(self, evidence_store: EvidenceStore) -> None:
         self.evidence_store = evidence_store
 
-    def resolve_git_commit_sha(self, repo_path: Path) -> str:
-        """Resolve actual 40-character Git commit SHA if in a git repository."""
+    def resolve_revision(self, repo_path: Path) -> tuple[str, str, str]:
+        """Resolve revision ID and type.
+        
+        Returns:
+            (revision_id, revision_type, notes)
+        """
         # 1. Try git subprocess
         try:
             res = subprocess.run(
@@ -54,7 +66,7 @@ class ReproducibilityEngine:
             if res.returncode == 0 and res.stdout.strip():
                 sha = res.stdout.strip()
                 if len(sha) == 40 and all(c in "0123456789abcdefABCDEF" for c in sha):
-                    return sha
+                    return sha, "GIT_COMMIT", "Verified Git Commit SHA resolved from HEAD."
         except Exception:
             pass
 
@@ -70,14 +82,19 @@ class ReproducibilityEngine:
                         if ref_path.exists():
                             sha = ref_path.read_text(encoding="utf-8").strip()
                             if len(sha) == 40:
-                                return sha
+                                return sha, "GIT_COMMIT", "Verified Git Commit SHA resolved from .git ref."
                     elif len(head_content) == 40:
-                        return head_content
+                        return head_content, "GIT_COMMIT", "Verified Git Commit SHA resolved from detached HEAD."
                 except Exception:
                     pass
 
-        # Fallback: Hash repo tree
-        return self.compute_file_inventory_merkle_hash(repo_path)[:40]
+        # Fallback: Content-addressed Merkle digest
+        merkle_digest = self.compute_file_inventory_merkle_hash(repo_path)[:40]
+        return merkle_digest, "CONTENT_DIGEST", "Git commit unavailable; content-addressed snapshot digest used."
+
+    def resolve_git_commit_sha(self, repo_path: Path) -> str:
+        revision_id, _, _ = self.resolve_revision(repo_path)
+        return revision_id
 
     def compute_file_inventory_merkle_hash(self, repo_path: Path) -> str:
         """Compute deterministic Merkle SHA-256 across all sorted files in repo."""
@@ -109,8 +126,13 @@ class ReproducibilityEngine:
     ) -> AuditReproducibilityManifest:
         repo_p = Path(repo_path).resolve()
 
-        # Real Commit SHA resolution
-        actual_commit_sha = commit_sha if (commit_sha and commit_sha != "HEAD") else self.resolve_git_commit_sha(repo_p)
+        # Real revision resolution
+        if commit_sha and commit_sha != "HEAD":
+            revision_id = commit_sha
+            revision_type = "GIT_COMMIT" if len(commit_sha) == 40 else "SPECIFIED_REVISION"
+            revision_notes = f"Explicitly supplied revision identifier '{commit_sha}'."
+        else:
+            revision_id, revision_type, revision_notes = self.resolve_revision(repo_p)
 
         # Real Merkle Inventory Hash
         inventory_hash = self.compute_file_inventory_merkle_hash(repo_p)
@@ -126,13 +148,16 @@ class ReproducibilityEngine:
         contract_hash = hashlib.sha256(runtime_contract_payload.encode("utf-8")).hexdigest() if runtime_contract_payload else "NO_CONTRACT"
 
         # Deterministic Replay Token
-        replay_raw = f"{audit_id}:{actual_commit_sha}:{inventory_hash}:{vault_digest}:{contract_hash}:{certification_state}"
+        replay_raw = f"{audit_id}:{revision_id}:{inventory_hash}:{vault_digest}:{contract_hash}:{certification_state}"
         replay_token = hashlib.sha256(replay_raw.encode("utf-8")).hexdigest()
 
         return AuditReproducibilityManifest(
             audit_id=audit_id,
             timestamp_iso=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            commit_sha=actual_commit_sha,
+            revision_id=revision_id,
+            revision_type=revision_type,
+            revision_notes=revision_notes,
+            commit_sha=revision_id,
             target_repo_path=str(repo_p),
             file_inventory_hash=inventory_hash,
             runtime_contract_hash=contract_hash[:16],

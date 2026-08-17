@@ -328,8 +328,50 @@ class TestAuditorPlatform(unittest.TestCase):
         )
 
         self.assertEqual(manifest.audit_id, "AUDIT-TEST-001")
+        self.assertEqual(manifest.revision_id, "abcdef123456")
         self.assertEqual(manifest.commit_sha, "abcdef123456")
         self.assertGreater(len(manifest.replay_token), 32)
+
+    def test_flow_step_status_precision(self):
+        """Verify flow steps distinguish DISCOVERED, STATICALLY_SUPPORTED, and UNVERIFIED."""
+        graph = ProjectGraph()
+        discover_ui_elements(FIXTURE_PATH, graph)
+        discover_api_endpoints(FIXTURE_PATH, graph)
+
+        flow_engine = UserFlowEngine(graph)
+        flows = flow_engine.discover_and_audit_flows()
+
+        generate_flow = next((f for f in flows if "Generate Resume" in f.flow_name), None)
+        self.assertIsNotNone(generate_flow)
+        # Step 1: Render Container -> DISCOVERED
+        self.assertEqual(generate_flow.steps[0].status.value, "DISCOVERED")
+        # Step 2: Trigger Control (with handler) -> STATICALLY_SUPPORTED
+        self.assertEqual(generate_flow.steps[1].status.value, "STATICALLY_SUPPORTED")
+        # Step 3: Outbound API (if present) -> STATICALLY_SUPPORTED
+
+    def test_gate_7_fails_on_missing_reproducibility(self):
+        """Verify Gate 7 strictly FAILS if reproducibility metadata is missing."""
+        graph = ProjectGraph()
+        graph.metadata = {}  # Empty metadata
+        verdict = VerdictEngine(graph).compute_verdict()
+        g7 = next((g for g in verdict["production_gates"] if g["gate_id"] == "GATE-7-REPRODUCIBILITY"), None)
+        self.assertIsNotNone(g7)
+        self.assertFalse(g7["passed"])
+
+    def test_gate_1_fails_on_truncated_discovery(self):
+        """Verify Gate 1 FAILS if file discovery universe was truncated due to limit."""
+        graph = ProjectGraph()
+        discover_ui_elements(FIXTURE_PATH, graph)
+        graph.metadata["file_discovery_universe"] = {
+            "files_discovered": 5000,
+            "files_skipped_due_to_limit": 120,
+            "discovery_truncated": True,
+        }
+        verdict = VerdictEngine(graph).compute_verdict()
+        g1 = next((g for g in verdict["production_gates"] if g["gate_id"] == "GATE-1-DISCOVERY"), None)
+        self.assertIsNotNone(g1)
+        self.assertFalse(g1["passed"])
+        self.assertEqual(verdict["certification_state"], CertificationState.PARTIALLY_AUDITED.value)
 
 
 if __name__ == "__main__":
