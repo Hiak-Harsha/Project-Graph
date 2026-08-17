@@ -152,6 +152,12 @@ Create Docker/OCI sandbox workers, dependency install/build/start detection,
 health probes, process lifecycle logs and an execution-contract schema. No UI
 or API check may be marked runtime-executed until this is present.
 
+The implemented contract schema is illustrated by
+`.project-graph/runtime-contract.example.json`. A project opts into execution
+by copying it to `runtime-contract.json` and filling in its real, non-secret
+start command and health endpoint. The supervisor rejects shell command
+strings, invalid ports, unbounded resources and undeclared runtime starts.
+
 ### Milestone 5 — Browser Lab and Runtime Reconciliation
 
 Add Playwright image, route inventory, DOM matching, click/form flows, network

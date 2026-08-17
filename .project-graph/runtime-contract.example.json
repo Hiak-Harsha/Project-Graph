@@ -1,0 +1,12 @@
+{
+  "start_command": ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"],
+  "internal_port": 8000,
+  "healthcheck_path": "/health",
+  "healthcheck_statuses": [200],
+  "startup_timeout_seconds": 45,
+  "cpu_limit": 1.0,
+  "memory_limit_mb": 1024,
+  "pids_limit": 256,
+  "environment": {},
+  "allow_outbound_network": false
+}

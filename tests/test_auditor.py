@@ -16,6 +16,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from packages.discovery import (
     build_audit_task_manifest,
@@ -27,6 +28,7 @@ from packages.discovery import (
 from packages.evidence import EvidenceStore, EvidenceType, reset_evidence_counter
 from packages.intelligence import CompletenessEngine, CrossCheckEngine, VerdictEngine
 from packages.orchestration import AgentOutput, AgentProposal, AgentRegistry
+from packages.sandbox.container_runtime import CommandResult, DockerSandboxSupervisor, RuntimeContract
 from packages.project_graph.models import CheckStatus, NodeType, reset_id_counters
 from packages.project_graph.store import ProjectGraph
 from packages.verification import VerificationRunner
@@ -90,11 +92,13 @@ class TestAuditorPlatform(unittest.TestCase):
         try:
             graph.persist(temp_db, evidence_store)
             conn = sqlite3.connect(temp_db)
-            check_count = conn.execute("SELECT COUNT(*) FROM audit_checks").fetchone()[0]
-            evidence_count = conn.execute("SELECT COUNT(*) FROM evidence_records").fetchone()[0]
+            try:
+                check_count = conn.execute("SELECT COUNT(*) FROM audit_checks").fetchone()[0]
+                evidence_count = conn.execute("SELECT COUNT(*) FROM evidence_records").fetchone()[0]
+            finally:
+                conn.close()
             self.assertGreaterEqual(check_count, 60)
-            self.assertGreater(evidence_count, 15)
-            conn.close()
+            self.assertGreaterEqual(evidence_count, 10)
         finally:
             if temp_db.exists():
                 temp_db.unlink()
@@ -108,8 +112,8 @@ class TestAuditorPlatform(unittest.TestCase):
         self.assertIsNotNone(missing_career_graph)
         self.assertEqual(missing_career_graph["category"], "MISSING_REQUIREMENT")
 
-    def test_dynamic_test_execution_and_assertion_quality(self):
-        """Verify test runner executes tests and detects trivial assertions."""
+    def test_test_quality_detection_without_host_execution(self):
+        """Verify weak assertions are found without executing untrusted tests on host."""
         graph, evidence_store, summary = run_full_audit(FIXTURE_PATH)
         findings = summary["findings"]
 
@@ -140,6 +144,17 @@ class TestAuditorPlatform(unittest.TestCase):
         self.assertFalse(any(e.evidence_type == EvidenceType.AUTH_BOUNDARY_TEST for e in evidence_store.find_by_target(endpoint.id)))
         self.assertGreater(summary["completeness"]["check_obligations"]["blocked"], 0)
 
+    def test_untrusted_runtime_never_executes_on_control_plane_host(self):
+        """Runtime API and test obligations wait for the container adapters."""
+        graph, evidence_store, _ = run_full_audit(FIXTURE_PATH)
+        runtime_checks = [
+            check for check in graph.audit_checks.values()
+            if check.execution_tier.value in {"RUNTIME_HTTP", "TEST_RUNNER"}
+        ]
+        self.assertTrue(runtime_checks)
+        self.assertTrue(all(check.status in (CheckStatus.BLOCKED, CheckStatus.NOT_APPLICABLE) for check in runtime_checks))
+        self.assertFalse(any(e.evidence_type == EvidenceType.TEST_EXECUTION for e in evidence_store.all()))
+
     def test_agent_registry_requires_evidence_for_findings(self):
         """Reasoning agents can propose findings but cannot create evidence-free truth."""
         registry = AgentRegistry()
@@ -156,6 +171,44 @@ class TestAuditorPlatform(unittest.TestCase):
             target_ids=["API-0001"], summary="Evidence-backed security proposal", evidence_ids=["EV-00001"], confidence=0.8,
         )
         self.assertTrue(registry.validate_proposal(supported)[0])
+
+    def test_hardened_sandbox_requires_contract_and_redacts_secrets(self):
+        """Container supervisor must require a contract and use only hardened Docker flags."""
+        commands: list[list[str]] = []
+
+        def fake_executor(command, cwd, timeout):
+            commands.append(command)
+            if command[:2] == ["docker", "port"]:
+                return CommandResult(0, "127.0.0.1:43821\n")
+            return CommandResult(0, "ok")
+
+        contract = RuntimeContract.from_dict({
+            "start_command": ["python", "-m", "uvicorn", "app:app"], "internal_port": 8123,
+            "environment": {"API_TOKEN": "not-for-evidence"}, "startup_timeout_seconds": 1,
+        })
+        with tempfile.TemporaryDirectory() as temp_dir, patch("packages.sandbox.container_runtime.shutil.which", return_value="docker"):
+            root = Path(temp_dir)
+            (root / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+            supervisor = DockerSandboxSupervisor(executor=fake_executor, health_probe=lambda url, timeout: 200)
+            execution = supervisor.start(root, contract)
+
+        self.assertEqual(execution.status, "HEALTHY")
+        self.assertIn("--network", commands[0])
+        self.assertIn("none", commands[0])
+        run_command = next(command for command in commands if command[:2] == ["docker", "run"])
+        self.assertIn("--read-only", run_command)
+        self.assertIn("--cap-drop", run_command)
+        self.assertIn("no-new-privileges", run_command)
+        self.assertNotIn("not-for-evidence", str(execution.commands))
+        self.assertIn("API_TOKEN=[REDACTED]", str(execution.commands))
+
+    def test_sandbox_blocks_when_runtime_contract_is_absent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+            execution = DockerSandboxSupervisor().start(root)
+        self.assertEqual(execution.status, "BLOCKED")
+        self.assertIn("runtime-contract", execution.reason)
 
 
 if __name__ == "__main__":

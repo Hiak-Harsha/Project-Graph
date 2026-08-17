@@ -26,6 +26,8 @@ class EnvironmentCapabilities:
     playwright_available: bool = False
     playwright_browsers: list[str] = field(default_factory=list)
     pytest_available: bool = False
+    docker_available: bool = False
+    docker_version: str = "UNAVAILABLE"
     database_sqlite_available: bool = True
     network_outbound_allowed: bool = False
     sandbox_isolation_tier: str = "PROCESS_ISOLATION"  # CONTAINER | PROCESS_ISOLATION | HOST
@@ -62,5 +64,16 @@ def detect_environment_capabilities() -> EnvironmentCapabilities:
         caps.playwright_browsers = ["chromium"]
     except ImportError:
         caps.playwright_available = False
+
+    docker_bin = shutil.which("docker")
+    if docker_bin:
+        try:
+            res = subprocess.run([docker_bin, "version", "--format", "{{.Server.Version}}"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                caps.docker_available = True
+                caps.docker_version = res.stdout.strip()
+                caps.sandbox_isolation_tier = "CONTAINER"
+        except Exception:
+            pass
 
     return caps

@@ -63,8 +63,11 @@ class UIVerifier:
             if handler_check:
                 handler_check.status = CheckStatus.FAILED
             if click_check:
-                click_check.status = CheckStatus.FAILED
-                click_check.unverified_reason = "Cannot execute click on dead control with missing handler."
+                # The static handler proof establishes the dead-control finding,
+                # but no browser click occurred. A runtime-tier check therefore
+                # remains blocked rather than being presented as a runtime fail.
+                click_check.status = CheckStatus.BLOCKED
+                click_check.unverified_reason = "Static analysis found no executable handler; no browser click was performed."
 
             ev = self.evidence_store.add(
                 evidence_type=EvidenceType.STATIC_PATTERN_ANALYSIS,
@@ -85,8 +88,8 @@ class UIVerifier:
                 handler_check.evidence_ids.append(ev.id)
 
             node.static_status = AuditStatus.FAILED
-            node.runtime_status = AuditStatus.FAILED
-            node.audit_status = AuditStatus.FAILED
+            node.runtime_status = AuditStatus.UNVERIFIED
+            node.refresh_audit_status(checks)
             checks_result["handler_attached_and_valid"] = False
             return AuditStatus.FAILED, checks_result, evidence_ids
 

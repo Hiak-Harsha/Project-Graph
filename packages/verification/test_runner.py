@@ -1,14 +1,13 @@
 """
-Dynamic Test Execution Runner (spec Milestone 2 §11 / P4)
+Test Quality Verifier (spec Milestone 2 §11 / P4)
 
-Executes discovered test suites using real test runners, captures pass/fail/error states,
-analyzes assertion quality (detecting trivial assertions like 'assert True'),
-and records cryptographic TEST_EXECUTION evidence.
+Analyzes assertion quality (detecting trivial assertions like 'assert True').
+Runtime test execution is deliberately blocked until the Docker sandbox adapter
+selects and runs the project's real test command.
 """
 from __future__ import annotations
 
 import ast
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -90,56 +89,14 @@ class TestRunnerVerifier:
             else:
                 struct_check.status = CheckStatus.PASSED
 
-        # 2. Dynamic Real Test Execution (Execute pytest or unittest)
-        start_time = time.time()
-        cmd = [sys.executable, "-m", "unittest", str(file_path)]
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(self.root),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=15,
-            )
-            duration = round(time.time() - start_time, 3)
-            passed = proc.returncode == 0
-            output_snippet = proc.stdout[-500:] if proc.stdout else ""
+        # P6: executing a repository's tests on the control-plane host would
+        # grant untrusted code host access. The sandbox test adapter will select
+        # and run the project's real test command after container startup.
+        if exec_check:
+            exec_check.status = CheckStatus.BLOCKED
+            exec_check.unverified_reason = "Host test execution is disabled by sandbox policy; requires Docker sandbox test adapter."
 
-            if exec_check:
-                exec_check.status = CheckStatus.PASSED if passed else CheckStatus.FAILED
-                exec_check.details = {
-                    "exit_code": proc.returncode,
-                    "duration_sec": duration,
-                    "output_tail": output_snippet,
-                }
-
-            ev = self.evidence_store.add(
-                evidence_type=EvidenceType.TEST_EXECUTION,
-                target_id=node.id,
-                summary=f"Test suite execution for '{file_rel}': {'PASSED' if passed else 'FAILED'} (Exit code {proc.returncode} in {duration}s).",
-                source_location=file_rel,
-                payload={
-                    "command": " ".join(cmd),
-                    "exit_code": proc.returncode,
-                    "duration_sec": duration,
-                    "output": proc.stdout,
-                },
-            )
-            evidence_ids.append(ev.id)
-            if exec_check:
-                exec_check.evidence_ids.append(ev.id)
-
-            node.static_status = AuditStatus.FAILED if has_weak_tests else AuditStatus.VERIFIED
-            node.runtime_status = AuditStatus.VERIFIED if passed else AuditStatus.FAILED
-            node.refresh_audit_status(checks)
-
-            return node.audit_status, {"passed": passed, "duration": duration, "weak_assertions": weak_assertions}, evidence_ids
-
-        except (subprocess.TimeoutExpired, OSError) as e:
-            if exec_check:
-                exec_check.status = CheckStatus.FAILED
-                exec_check.unverified_reason = f"Test execution failed with error: {e}"
-            node.runtime_status = AuditStatus.FAILED
-            node.refresh_audit_status(checks)
-            return node.audit_status, {"error": str(e)}, evidence_ids
+        node.static_status = AuditStatus.FAILED if has_weak_tests else AuditStatus.VERIFIED
+        node.runtime_status = AuditStatus.UNVERIFIED
+        node.refresh_audit_status(checks)
+        return node.audit_status, {"blocked": True, "weak_assertions": weak_assertions}, evidence_ids

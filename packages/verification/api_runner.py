@@ -9,9 +9,7 @@ Zero synthetic or mock responses are produced.
 from __future__ import annotations
 
 import ast
-import importlib.util
 import json
-import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -36,7 +34,10 @@ class APIRunnerVerifier:
         self._app_instance = None
         self._test_client = None
         self._identity_fixtures = self._load_identity_fixtures()
-        self._init_real_app()
+        # P6: audited repositories must never be imported into the audit
+        # control-plane process. DockerSandboxSupervisor is now the only
+        # approved runtime entry point; its HTTP adapter is the next slice.
+        self._runtime_error = "In-process ASGI execution is disabled by sandbox policy; runtime HTTP requires a healthy Docker sandbox adapter."
 
     def _load_identity_fixtures(self) -> dict[str, dict[str, Any]]:
         """Load only explicit BOLA fixtures; absent/malformed input means no test."""
@@ -54,45 +55,6 @@ class APIRunnerVerifier:
     def _redact_headers(headers: dict[str, Any]) -> dict[str, str]:
         secret_headers = {"authorization", "cookie", "x-api-key"}
         return {str(k): "[REDACTED]" if str(k).lower() in secret_headers else str(v) for k, v in headers.items()}
-
-    def _init_real_app(self) -> None:
-        """Attempt to load real FastAPI/ASGI backend into an in-process TestClient."""
-        main_py = self.root / "backend" / "app" / "main.py"
-        if not main_py.exists():
-            for p in self.root.rglob("main.py"):
-                if "backend" in str(p) or "app" in str(p):
-                    main_py = p
-                    break
-
-        if main_py.exists():
-            try:
-                spec = importlib.util.spec_from_file_location("dynamic_app_target", str(main_py))
-                if spec and spec.loader:
-                    mod = importlib.util.module_from_spec(spec)
-                    sys_path_added = str(main_py.parent)
-                    if sys_path_added not in sys.path:
-                        sys.path.insert(0, sys_path_added)
-                    spec.loader.exec_module(mod)
-                    if hasattr(mod, "app"):
-                        self._app_instance = getattr(mod, "app")
-                        self._init_test_client()
-            except Exception:
-                self._app_instance = None
-
-    def _init_test_client(self) -> None:
-        """Instantiate starlette or fastapi TestClient against the real app."""
-        if self._app_instance is None:
-            return
-
-        try:
-            from starlette.testclient import TestClient
-            self._test_client = TestClient(self._app_instance, raise_server_exceptions=False)
-        except ImportError:
-            try:
-                from fastapi.testclient import TestClient
-                self._test_client = TestClient(self._app_instance, raise_server_exceptions=False)
-            except ImportError:
-                self._test_client = None
 
     def verify_all_endpoints(self) -> None:
         for node in self.graph.nodes_of_type(NodeType.API_ENDPOINT):
@@ -157,8 +119,8 @@ class APIRunnerVerifier:
         else:
             # Honest unverified status
             if http_exec_check:
-                http_exec_check.status = CheckStatus.UNVERIFIED
-                http_exec_check.unverified_reason = "TestClient runtime unavailable or app could not be booted."
+                http_exec_check.status = CheckStatus.BLOCKED
+                http_exec_check.unverified_reason = self._runtime_error
             if bola_runtime_check:
                 contract = self._identity_fixtures.get(f"{method} {route_path}")
                 required = {"owner_headers", "attacker_headers", "owner_resource_path", "provisioning_evidence"}
@@ -167,7 +129,7 @@ class APIRunnerVerifier:
                     bola_runtime_check.unverified_reason = "Requires provisioned owner/attacker fixture contract in .project-graph/identity-fixtures.json; no synthetic identities were used."
                 elif is_parameterized:
                     bola_runtime_check.status = CheckStatus.BLOCKED
-                    bola_runtime_check.unverified_reason = "TestClient runtime unavailable; supplied BOLA fixture could not be executed."
+                    bola_runtime_check.unverified_reason = self._runtime_error
                 else:
                     bola_runtime_check.status = CheckStatus.NOT_APPLICABLE
 
