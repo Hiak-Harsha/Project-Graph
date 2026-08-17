@@ -31,6 +31,31 @@ def ensure_audit_run():
         LATEST_GRAPH, LATEST_EVIDENCE_STORE, LATEST_SUMMARY = run_full_audit(FIXTURE_DEFAULT_REPO)
 
 
+FORBIDDEN_SYSTEM_PATHS = {
+    "/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin",
+    "c:\\", "c:\\windows", "c:\\program files", "c:\\program files (x86)", "c:\\users",
+}
+
+
+def validate_safe_repo_path(raw_path: str) -> tuple[bool, Optional[Path], str]:
+    if not raw_path:
+        return True, FIXTURE_DEFAULT_REPO, ""
+
+    try:
+        resolved = Path(raw_path).resolve()
+    except Exception as e:
+        return False, None, f"Invalid path syntax: {e}"
+
+    resolved_str = str(resolved).lower().rstrip("/\\")
+    if resolved_str in FORBIDDEN_SYSTEM_PATHS or resolved == resolved.parent:
+        return False, None, "Access to root or system directory is blocked for security."
+
+    if not resolved.exists() or not resolved.is_dir():
+        return False, None, f"Repository directory does not exist or is not a folder: {resolved}"
+
+    return True, resolved, ""
+
+
 class AuditRequestHandler(BaseHTTPRequestHandler):
     def send_json(self, data: dict | list, status_code: int = 200) -> None:
         payload = json.dumps(data).encode("utf-8")
@@ -110,9 +135,9 @@ class AuditRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 data = {}
 
-            target_repo = Path(data.get("repo_path", str(FIXTURE_DEFAULT_REPO)))
-            if not target_repo.exists():
-                self.send_json({"error": f"Path not found: {target_repo}"}, status_code=400)
+            is_valid, target_repo, err_msg = validate_safe_repo_path(data.get("repo_path"))
+            if not is_valid:
+                self.send_json({"error": err_msg}, status_code=400)
                 return
 
             LATEST_GRAPH, LATEST_EVIDENCE_STORE, LATEST_SUMMARY = run_full_audit(target_repo)

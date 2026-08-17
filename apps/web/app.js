@@ -151,6 +151,16 @@ function setDomainScore(id, score) {
   }
 }
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function renderFindings(findings) {
   const container = document.getElementById('findings-container');
   container.innerHTML = '';
@@ -167,20 +177,20 @@ function renderFindings(findings) {
 
   filtered.forEach(f => {
     const card = document.createElement('div');
-    card.className = `finding-card glass-panel severity-${f.severity}`;
+    card.className = `finding-card glass-panel severity-${escapeHtml(f.severity)}`;
     card.innerHTML = `
       <div class="finding-header">
         <div class="finding-badges">
-          <span class="sev-tag sev-${f.severity}">${f.severity}</span>
-          <span class="cat-tag">${f.category}</span>
-          <span class="cat-tag">• ${f.affected_feature}</span>
+          <span class="sev-tag sev-${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span>
+          <span class="cat-tag">${escapeHtml(f.category)}</span>
+          <span class="cat-tag">• ${escapeHtml(f.affected_feature)}</span>
         </div>
-        <span class="status-pill status-${f.status === 'CONFIRMED' ? 'failed' : 'passed'}">${f.status}</span>
+        <span class="status-pill status-${f.status === 'CONFIRMED' ? 'failed' : 'passed'}">${escapeHtml(f.status)}</span>
       </div>
-      <h3 class="finding-title">${f.title}</h3>
-      <p class="finding-desc">${f.description}</p>
+      <h3 class="finding-title">${escapeHtml(f.title)}</h3>
+      <p class="finding-desc">${escapeHtml(f.description)}</p>
       <div class="finding-footer">
-        <span>Evidence: <span class="evidence-pill">${f.evidence_ids.join(', ')}</span></span>
+        <span>Evidence: <span class="evidence-pill">${f.evidence_ids.map(escapeHtml).join(', ')}</span></span>
         <span>Confidence: ${Math.round(f.confidence * 100)}%</span>
       </div>
     `;
@@ -193,36 +203,36 @@ function showFindingModal(f) {
   const modal = document.getElementById('modal-content');
   modal.innerHTML = `
     <div style="margin-bottom: 20px;">
-      <span class="sev-tag sev-${f.severity}">${f.severity}</span>
-      <span style="margin-left: 8px; color: var(--text-dim);">${f.category}</span>
-      <h2 style="font-size: 1.3rem; margin-top: 10px; color: #fff;">${f.title}</h2>
+      <span class="sev-tag sev-${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span>
+      <span style="margin-left: 8px; color: var(--text-dim);">${escapeHtml(f.category)}</span>
+      <h2 style="font-size: 1.3rem; margin-top: 10px; color: #fff;">${escapeHtml(f.title)}</h2>
     </div>
 
     <div style="margin-bottom: 16px;">
       <h4 style="font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase;">Observed Flaw / Behavior</h4>
-      <p style="color: var(--text-main); margin-top: 4px; line-height: 1.5;">${f.observed_behavior}</p>
+      <p style="color: var(--text-main); margin-top: 4px; line-height: 1.5;">${escapeHtml(f.observed_behavior)}</p>
     </div>
 
     <div style="margin-bottom: 16px;">
       <h4 style="font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase;">Expected Invariant / Contract</h4>
-      <p style="color: var(--text-main); margin-top: 4px; line-height: 1.5;">${f.expected_behavior}</p>
+      <p style="color: var(--text-main); margin-top: 4px; line-height: 1.5;">${escapeHtml(f.expected_behavior)}</p>
     </div>
 
     <div style="margin-bottom: 16px;">
       <h4 style="font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase;">Reproduction Steps</h4>
       <ol style="margin-left: 20px; margin-top: 4px; color: var(--text-muted); line-height: 1.6;">
-        ${f.reproduction_steps.map(s => `<li>${s}</li>`).join('')}
+        ${(f.reproduction_steps || []).map(s => `<li>${escapeHtml(s)}</li>`).join('')}
       </ol>
     </div>
 
     <div style="margin-bottom: 16px; padding: 14px; background: rgba(0,0,0,0.3); border-radius: 8px; border-left: 3px solid var(--accent);">
       <h4 style="font-size: 0.8rem; color: var(--accent); text-transform: uppercase;">Recommended Remediation</h4>
-      <p style="color: #fff; margin-top: 4px;">${f.recommendation}</p>
+      <p style="color: #fff; margin-top: 4px;">${escapeHtml(f.recommendation)}</p>
     </div>
 
     <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 12px;">
-      <span>Adversarial Review: <strong>${f.adversarial_verdict || 'VERIFIED'}</strong></span>
-      <span>Evidence Links: <strong>${f.evidence_ids.join(', ')}</strong></span>
+      <span>Adversarial Review: <strong>${escapeHtml(f.adversarial_verdict || 'VERIFIED')}</strong></span>
+      <span>Evidence Links: <strong>${(f.evidence_ids || []).map(escapeHtml).join(', ')}</strong></span>
     </div>
   `;
   document.getElementById('modal-overlay').classList.add('active');
@@ -238,11 +248,11 @@ async function renderTasks() {
     tasks.forEach(t => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td style="font-family: var(--font-mono);">${t.id}</td>
-        <td>${t.task_type}</td>
-        <td style="font-family: var(--font-mono); color: var(--accent);">${t.target_id}</td>
-        <td>${t.required_checks.slice(0, 3).join(', ')}...</td>
-        <td><span class="status-pill status-${t.status === 'COMPLETED' ? 'passed' : 'failed'}">${t.status}</span></td>
+        <td style="font-family: var(--font-mono);">${escapeHtml(t.id)}</td>
+        <td>${escapeHtml(t.task_type)}</td>
+        <td style="font-family: var(--font-mono); color: var(--accent);">${escapeHtml(t.target_id)}</td>
+        <td>${escapeHtml((t.required_checks || []).slice(0, 3).join(', '))}...</td>
+        <td><span class="status-pill status-${t.status === 'COMPLETED' ? 'passed' : 'failed'}">${escapeHtml(t.status)}</span></td>
       `;
       tbody.appendChild(tr);
     });
@@ -257,12 +267,12 @@ function renderEvidence(records) {
   records.forEach(e => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="font-family: var(--font-mono); color: var(--accent);">${e.id}</td>
-      <td>${e.evidence_type}</td>
-      <td style="font-family: var(--font-mono);">${e.target_id}</td>
-      <td style="font-family: var(--font-mono);">${e.source_location || '—'}</td>
-      <td style="font-family: var(--font-mono); color: var(--text-dim);">${e.sha256_hash.slice(0, 12)}...</td>
-      <td>${e.summary}</td>
+      <td style="font-family: var(--font-mono); color: var(--accent);">${escapeHtml(e.id)}</td>
+      <td>${escapeHtml(e.evidence_type)}</td>
+      <td style="font-family: var(--font-mono);">${escapeHtml(e.target_id)}</td>
+      <td style="font-family: var(--font-mono);">${escapeHtml(e.source_location || '—')}</td>
+      <td style="font-family: var(--font-mono); color: var(--text-dim);">${escapeHtml((e.sha256_hash || '').slice(0, 12))}...</td>
+      <td>${escapeHtml(e.summary)}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -276,12 +286,12 @@ function renderCoverage(byCat) {
   Object.entries(byCat).forEach(([type, data]) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="font-weight: 600;">${type}</td>
-      <td>${data.total_discovered}</td>
-      <td style="color: #34d399;">${data.verified}</td>
-      <td style="color: #f87171;">${data.failed}</td>
-      <td>${data.unverified}</td>
-      <td style="font-weight: 700; color: ${data.coverage_pct === 100 ? '#34d399' : '#fbbf24'}">${data.coverage_pct}%</td>
+      <td style="font-weight: 600;">${escapeHtml(type)}</td>
+      <td>${escapeHtml(data.total_discovered)}</td>
+      <td style="color: #34d399;">${escapeHtml(data.verified)}</td>
+      <td style="color: #f87171;">${escapeHtml(data.failed)}</td>
+      <td>${escapeHtml(data.unverified)}</td>
+      <td style="font-weight: 700; color: ${data.coverage_pct === 100 ? '#34d399' : '#fbbf24'}">${escapeHtml(data.coverage_pct)}%</td>
     `;
     tbody.appendChild(tr);
   });

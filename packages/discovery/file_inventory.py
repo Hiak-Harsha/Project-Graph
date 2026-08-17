@@ -23,7 +23,17 @@ IGNORE_DIRS = {
     ".pytest_cache",
     ".mypy_cache",
     ".gemini",
+    "Windows",
+    "Program Files",
+    "Program Files (x86)",
+    "AppData",
+    "proc",
+    "sys",
+    "dev",
+    "etc",
 }
+
+MAX_FILE_LIMIT = 5000
 
 
 def _hash_file(path: Path) -> str:
@@ -37,7 +47,8 @@ def _hash_file(path: Path) -> str:
 
 def _loc(path: Path) -> int | None:
     try:
-        return sum(1 for _ in path.open("r", encoding="utf-8", errors="ignore"))
+        with path.open("r", encoding="utf-8", errors="ignore") as f:
+            return sum(1 for _ in f)
     except OSError:
         return None
 
@@ -45,6 +56,8 @@ def _loc(path: Path) -> int | None:
 def discover_files(root: Path, graph: ProjectGraph) -> list[GraphNode]:
     discovered: list[GraphNode] = []
     for path in sorted(root.rglob("*")):
+        if len(discovered) >= MAX_FILE_LIMIT:
+            break
         if not path.is_file():
             continue
         if any(part in IGNORE_DIRS for part in path.parts):

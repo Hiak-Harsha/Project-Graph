@@ -29,8 +29,14 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
-# SQLite temp databases
+# SQLite & Audit run artifacts
+*.sqlite
 *.sqlite-journal
+audit_summary.json
+
+# Archives
+*.zip
+*.tar.gz
+
+# Test caches
+.pytest_cache/

@@ -27,12 +27,37 @@ app = FastAPI(
     version="1.0.0",
 )
 
+FORBIDDEN_SYSTEM_PATHS = {
+    "/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin",
+    "c:\\", "c:\\windows", "c:\\program files", "c:\\program files (x86)", "c:\\users",
+}
+
+
+def validate_safe_repo_path(raw_path: str) -> tuple[bool, Optional[Path], str]:
+    if not raw_path:
+        return True, FIXTURE_DEFAULT_REPO, ""
+
+    try:
+        resolved = Path(raw_path).resolve()
+    except Exception as e:
+        return False, None, f"Invalid path syntax: {e}"
+
+    resolved_str = str(resolved).lower().rstrip("/\\")
+    if resolved_str in FORBIDDEN_SYSTEM_PATHS or resolved == resolved.parent:
+        return False, None, "Access to root or system directory is blocked for security."
+
+    if not resolved.exists() or not resolved.is_dir():
+        return False, None, f"Repository directory does not exist or is not a folder: {resolved}"
+
+    return True, resolved, ""
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # In-memory latest audit cache
@@ -58,9 +83,9 @@ def startup_audit():
 @app.post("/api/audits/run")
 def trigger_audit(req: RunAuditRequest):
     global LATEST_GRAPH, LATEST_EVIDENCE_STORE, LATEST_SUMMARY
-    target_path = Path(req.repo_path) if req.repo_path else FIXTURE_DEFAULT_REPO
-    if not target_path.exists():
-        raise HTTPException(status_code=400, detail=f"Repository path does not exist: {target_path}")
+    is_valid, target_path, err = validate_safe_repo_path(req.repo_path)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=err)
 
     LATEST_GRAPH, LATEST_EVIDENCE_STORE, LATEST_SUMMARY = run_full_audit(target_path)
     return LATEST_SUMMARY
