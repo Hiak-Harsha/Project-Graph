@@ -55,7 +55,7 @@ class AuthVerifier:
                         "user_id == current_user",
                         "user_id == user.id",
                         "owner_id == user",
-                        "resume.user_id ==",
+                        ".user_id ==",
                         "item.user_id ==",
                         "where: { id, userid }",
                         "where(user_id=",

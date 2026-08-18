@@ -8,7 +8,7 @@ Identifies:
 - Dead functionality (controls with no behavioral execution)
 - Orphaned components (components with no parent page/route)
 - Broken backend integrations
-- Untested critical features
+- Advertised features without backing implementation (Negative-space discovery)
 """
 from __future__ import annotations
 
@@ -30,13 +30,19 @@ class CrossCheckEngine:
 
     def cross_check(self) -> list[Finding]:
         findings: list[Finding] = []
-        finding_idx = 1
+        finding_idx = len(self.graph.findings) + 1
 
-        # 1. Check for Dead UI Interactions (e.g. Export Resume button with no handler)
+        # 1. Check for Dead UI Interactions (e.g. Button with no handler)
         for ui in self.graph.nodes_of_type(NodeType.UI_ELEMENT):
             if ui.audit_status == AuditStatus.FAILED:
                 evs = self.evidence_store.find_by_target(ui.id)
                 ev_ids = [e.id for e in evs]
+                
+                # Find parent feature if connected
+                in_edges = self.graph.edges_to(ui.id)
+                feat_node = next((self.graph.get_node(e.source) for e in in_edges if self.graph.get_node(e.source) and self.graph.get_node(e.source).node_type == NodeType.FEATURE), None)
+                feat_name = feat_node.name if feat_node else "User Interface"
+
                 f = Finding(
                     id=f"FINDING-{finding_idx:04d}",
                     title=f"Dead UI Interaction: '{ui.name}' has no execution handler",
@@ -44,13 +50,13 @@ class CrossCheckEngine:
                     severity=Severity.HIGH,
                     status="CONFIRMED",
                     confidence=0.98,
-                    affected_feature="Resume Generation & Management" if "resume" in ui.name.lower() else "UI Core",
+                    affected_feature=feat_name,
                     affected_nodes=[ui.id],
                     description=f"UI element '{ui.name}' in {ui.metadata.get('file')} is rendered as an actionable control but has no attached event listener, handler function, or navigation target.",
                     observed_behavior="Clicking the element produces no observable state mutation, API request, navigation, or download.",
                     expected_behavior="Clicking an actionable button or link should trigger the designated business operation or navigation.",
                     evidence_ids=ev_ids,
-                    root_cause="Event handler attribute is missing or unbound in component JSX.",
+                    root_cause="Event handler attribute is missing or unbound in component JSX/TSX.",
                     recommendation=f"Attach a valid handler function or remove the '{ui.metadata.get('label')}' control from {ui.metadata.get('file')}.",
                     reproduction_steps=[
                         f"1. Navigate to component at {ui.metadata.get('file')}:{ui.metadata.get('line')}",
@@ -119,9 +125,9 @@ class CrossCheckEngine:
                     severity=Severity.HIGH,
                     status="CONFIRMED",
                     confidence=0.95,
-                    affected_feature="External AI/API Integration",
+                    affected_feature="External Service Integration",
                     affected_nodes=[api.id],
-                    description=f"Endpoint '{api.name}' dispatches requests to an external API (LLM/Payment/Cloud) without an explicit request timeout or circuit breaker.",
+                    description=f"Endpoint '{api.name}' dispatches requests to an external API without an explicit request timeout or circuit breaker.",
                     observed_behavior="When the external provider experiences latency or outages, the request thread blocks indefinitely.",
                     expected_behavior="All external HTTP/SDK calls must enforce bounded timeouts (e.g. 15s) with appropriate retry/fallback policies.",
                     evidence_ids=ev_ids,

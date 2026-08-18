@@ -270,12 +270,12 @@ class APIRunnerVerifier:
             tree = ast.parse(file_path.read_text(encoding="utf-8", errors="ignore"))
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if not handler_name or node.name == handler_name or "resume" in node.name.lower():
+                    if not handler_name or node.name.lower() == handler_name.lower() or (handler_name and handler_name.lower() in node.name.lower()):
                         # Check function arguments for current_user or session
                         arg_names = [arg.arg for arg in node.args.args]
                         has_user_arg = any("user" in a.lower() or "auth" in a.lower() for a in arg_names)
                         source_segment = ast.unparse(node)
-                        has_ownership_filter = "user_id" in source_segment or "owner_id" in source_segment
+                        has_ownership_filter = "user_id" in source_segment or "owner_id" in source_segment or "tenant_id" in source_segment
                         if not has_user_arg and not has_ownership_filter:
                             return True
             return False

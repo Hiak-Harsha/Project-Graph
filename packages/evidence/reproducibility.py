@@ -54,115 +54,107 @@ class ReproducibilityEngine:
         Returns:
             (revision_id, revision_type, notes)
         """
-        # 1. Try git subprocess
-        try:
-            res = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=str(repo_path),
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            if res.returncode == 0 and res.stdout.strip():
-                sha = res.stdout.strip()
-                if len(sha) == 40 and all(c in "0123456789abcdefABCDEF" for c in sha):
-                    return sha, "GIT_COMMIT", "Verified Git Commit SHA resolved from HEAD."
-        except Exception:
-            pass
-
-        # 2. Try parsing .git directory directly
+        # Only use git rev-parse if repo_path contains its own .git folder
         git_dir = repo_path / ".git"
-        if git_dir.exists() and git_dir.is_dir():
-            head_file = git_dir / "HEAD"
-            if head_file.exists():
-                try:
-                    head_content = head_file.read_text(encoding="utf-8").strip()
-                    if head_content.startswith("ref: "):
-                        ref_path = git_dir / head_content.replace("ref: ", "").strip()
-                        if ref_path.exists():
-                            sha = ref_path.read_text(encoding="utf-8").strip()
-                            if len(sha) == 40:
-                                return sha, "GIT_COMMIT", "Verified Git Commit SHA resolved from .git ref."
-                    elif len(head_content) == 40:
-                        return head_content, "GIT_COMMIT", "Verified Git Commit SHA resolved from detached HEAD."
-                except Exception:
-                    pass
+        if git_dir.exists():
+            try:
+                res = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    sha = res.stdout.strip()
+                    if len(sha) == 40 and all(c in "0123456789abcdefABCDEF" for c in sha):
+                        return sha, "GIT_COMMIT", "Verified Git Commit SHA resolved from HEAD."
+            except Exception:
+                pass
 
-        # Fallback: Content-addressed Merkle digest
+            if git_dir.is_dir():
+                head_file = git_dir / "HEAD"
+                if head_file.exists():
+                    try:
+                        head_content = head_file.read_text(encoding="utf-8").strip()
+                        if head_content.startswith("ref: "):
+                            ref_path = git_dir / head_content.replace("ref: ", "").strip()
+                            if ref_path.exists():
+                                sha = ref_path.read_text(encoding="utf-8").strip()
+                                if len(sha) == 40:
+                                    return sha, "GIT_COMMIT", "Verified Git Commit SHA resolved from .git ref."
+                        elif len(head_content) == 40:
+                            return head_content, "GIT_COMMIT", "Verified Git Commit SHA resolved from detached HEAD."
+                    except Exception:
+                        pass
+
+        # Content-addressed Merkle digest for directories without direct .git
         merkle_digest = self.compute_file_inventory_merkle_hash(repo_path)[:40]
-        return merkle_digest, "CONTENT_DIGEST", "Git commit unavailable; content-addressed snapshot digest used."
+        return merkle_digest, "CONTENT_DIGEST", "Directory content-addressed Merkle snapshot digest used."
 
     def resolve_git_commit_sha(self, repo_path: Path) -> str:
-        revision_id, _, _ = self.resolve_revision(repo_path)
-        return revision_id
+        sha, _, _ = self.resolve_revision(repo_path)
+        return sha
 
     def compute_file_inventory_merkle_hash(self, repo_path: Path) -> str:
-        """Compute deterministic Merkle SHA-256 across all sorted files in repo."""
-        hasher = hashlib.sha256()
-        try:
-            for file_path in sorted(repo_path.rglob("*")):
-                if any(p in (".git", "__pycache__", "node_modules", ".pytest_cache") for p in file_path.parts):
+        files = []
+        for p in sorted(repo_path.rglob("*")):
+            if p.is_file() and not any(part.startswith(".") or part in ("node_modules", "__pycache__", "venv", ".git") for part in p.parts):
+                try:
+                    rel = p.relative_to(repo_path).as_posix()
+                    file_sha = hashlib.sha256(p.read_bytes()).hexdigest()
+                    files.append(f"{rel}:{file_sha}")
+                except (OSError, PermissionError):
                     continue
-                if file_path.is_file():
-                    rel = str(file_path.relative_to(repo_path)).replace("\\", "/")
-                    size = file_path.stat().st_size
-                    try:
-                        content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-                    except Exception:
-                        content_hash = "UNREADABLE"
-                    hasher.update(f"{rel}:{size}:{content_hash}\n".encode("utf-8"))
-        except Exception:
-            hasher.update(str(repo_path).encode("utf-8"))
 
-        return hasher.hexdigest()
+        content = "\n".join(sorted(files))
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def generate_manifest(
         self,
         audit_id: str,
-        repo_path: str | Path,
-        commit_sha: str | None = None,
-        certification_state: str = "NOT_PRODUCTION_READY",
+        repo_path: str,
+        certification_state: str,
         runtime_contract_payload: str = "",
+        commit_sha: Optional[str] = None,
+        revision_id: Optional[str] = None,
     ) -> AuditReproducibilityManifest:
-        repo_p = Path(repo_path).resolve()
+        p = Path(repo_path)
+        resolved_id, rev_type, rev_notes = self.resolve_revision(p)
+        effective_rev_id = revision_id or commit_sha or resolved_id
+        effective_rev_type = "GIT_COMMIT" if commit_sha else rev_type
+        inventory_hash = self.compute_file_inventory_merkle_hash(p)
 
-        # Real revision resolution
-        if commit_sha and commit_sha != "HEAD":
-            revision_id = commit_sha
-            revision_type = "GIT_COMMIT" if len(commit_sha) == 40 else "SPECIFIED_REVISION"
-            revision_notes = f"Explicitly supplied revision identifier '{commit_sha}'."
+        contract_hash = ""
+        if runtime_contract_payload:
+            contract_hash = hashlib.sha256(runtime_contract_payload.encode("utf-8")).hexdigest()
         else:
-            revision_id, revision_type, revision_notes = self.resolve_revision(repo_p)
+            contract_file = p / ".project-graph" / "runtime-contract.json"
+            if contract_file.exists():
+                try:
+                    contract_hash = hashlib.sha256(contract_file.read_bytes()).hexdigest()
+                except OSError:
+                    pass
 
-        # Real Merkle Inventory Hash
-        inventory_hash = self.compute_file_inventory_merkle_hash(repo_p)
+        ev_digest = self.evidence_store.compute_vault_merkle_root()
 
-        # Compute evidence vault digest
-        all_ev = self.evidence_store.all()
-        hasher = hashlib.sha256()
-        for ev in sorted(all_ev, key=lambda e: e.id):
-            hasher.update(f"{ev.id}:{ev.evidence_type.value}:{ev.sha256_hash}".encode("utf-8"))
-        vault_digest = hasher.hexdigest()
+        timestamp_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-        # Contract hash
-        contract_hash = hashlib.sha256(runtime_contract_payload.encode("utf-8")).hexdigest() if runtime_contract_payload else "NO_CONTRACT"
-
-        # Deterministic Replay Token
-        replay_raw = f"{audit_id}:{revision_id}:{inventory_hash}:{vault_digest}:{contract_hash}:{certification_state}"
-        replay_token = hashlib.sha256(replay_raw.encode("utf-8")).hexdigest()
+        # Generate Replay Token (Deterministic hash of inputs)
+        token_payload = f"{effective_rev_id}:{inventory_hash}:{contract_hash}:{ev_digest}"
+        replay_token = f"RPL-{hashlib.sha256(token_payload.encode('utf-8')).hexdigest()}"
 
         return AuditReproducibilityManifest(
             audit_id=audit_id,
-            timestamp_iso=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            revision_id=revision_id,
-            revision_type=revision_type,
-            revision_notes=revision_notes,
-            commit_sha=revision_id,
-            target_repo_path=str(repo_p),
+            timestamp_iso=timestamp_iso,
+            revision_id=effective_rev_id,
+            revision_type=effective_rev_type,
+            target_repo_path=str(p.resolve()),
             file_inventory_hash=inventory_hash,
-            runtime_contract_hash=contract_hash[:16],
-            evidence_vault_digest=vault_digest,
+            runtime_contract_hash=contract_hash,
+            evidence_vault_digest=ev_digest,
             certification_state=certification_state,
-            evidence_count=len(all_ev),
+            revision_notes=rev_notes,
+            evidence_count=len(self.evidence_store.all()),
             replay_token=replay_token,
         )

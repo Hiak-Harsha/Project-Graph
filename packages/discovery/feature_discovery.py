@@ -1,13 +1,15 @@
 """
 Phase: FEATURE & REQUIREMENT DISCOVERY (spec Milestone 1 §17-18)
 
-Extracts explicit features and requirements from README/docs,
-and clusters API/UI modules into high-level features.
+Extracts explicit features and requirements from repository README/docs,
+and dynamically clusters API/UI modules into high-level features.
+Zero hardcoded domain or benchmark assumptions.
 """
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from collections import defaultdict
 
 from packages.project_graph.models import GraphNode, NodeType, next_id
 from packages.project_graph.store import ProjectGraph
@@ -19,13 +21,15 @@ def discover_features_and_requirements(root: Path, graph: ProjectGraph) -> tuple
 
     # 1. Parse README.md / docs for explicit feature bullets
     readme_paths = list(root.glob("README.md")) + list(root.glob("readme.md")) + list(root.glob("docs/*.md"))
+    discovered_explicit_feature_names: list[str] = []
+
     for rpath in readme_paths:
         try:
             content = rpath.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
 
-        # Look for headers like Features, Capabilities, User Stories
+        # Look for headers like Features, Capabilities, User Stories, Key Features
         lines = content.splitlines()
         in_feature_section = False
         for line in lines:
@@ -38,6 +42,7 @@ def discover_features_and_requirements(root: Path, graph: ProjectGraph) -> tuple
             if in_feature_section and (line.startswith("- ") or line.startswith("* ") or re.match(r"^\d+\.\s+", line)):
                 text = re.sub(r"^[-*\d.]+\s+", "", line).strip()
                 if len(text) > 4:
+                    discovered_explicit_feature_names.append(text)
                     # Create Requirement node
                     req_node = GraphNode(
                         id=next_id(NodeType.REQUIREMENT),
@@ -52,38 +57,91 @@ def discover_features_and_requirements(root: Path, graph: ProjectGraph) -> tuple
                     graph.add_node(req_node)
                     requirements.append(req_node)
 
-    # 2. Derive Features from explicit requirements and match against codebase
     api_nodes = graph.nodes_of_type(NodeType.API_ENDPOINT)
     ui_nodes = graph.nodes_of_type(NodeType.UI_ELEMENT)
     db_nodes = graph.nodes_of_type(NodeType.DATABASE_ENTITY)
 
-    domain_keywords = {
-        "User Authentication and Session Management": ["auth", "login", "signup", "logout", "token", "user", "session"],
-        "AI Resume Generation & Export": ["resume", "cv", "export", "generate", "template"],
-        "Career Graph Visualization": ["graph", "career", "pathway", "skill", "node", "network"],
-        "Job Recommendations & Analytics": ["recommend", "analytic", "job", "match", "insight"],
-    }
+    # 2. Derive Features from explicit README declarations (if present)
+    if discovered_explicit_feature_names:
+        for feat_text in discovered_explicit_feature_names:
+            # Extract meaningful words (len >= 3)
+            words = [w.lower() for w in re.findall(r"\b[A-Za-z]{3,}\b", feat_text) if w.lower() not in {"and", "the", "for", "with", "using", "from"}]
+            
+            matched_apis = [
+                a for a in api_nodes
+                if any(w in a.name.lower() or w in a.metadata.get("path", "").lower() for w in words)
+            ]
+            matched_uis = [
+                u for u in ui_nodes
+                if any(w in u.name.lower() or w in u.metadata.get("file", "").lower() or w in u.metadata.get("label", "").lower() for w in words)
+            ]
+            matched_dbs = [
+                d for d in db_nodes
+                if any(w in d.name.lower() for w in words)
+            ]
 
-    for feat_name, kws in domain_keywords.items():
-        matched_apis = [a for a in api_nodes if any(kw in a.name.lower() or kw in a.metadata.get("path", "").lower() for kw in kws)]
-        matched_uis = [u for u in ui_nodes if any(kw in u.name.lower() or kw in u.metadata.get("file", "").lower() for kw in kws)]
-        matched_dbs = [d for d in db_nodes if any(kw in d.name.lower() for kw in kws)]
+            has_implementation = bool(matched_apis or matched_uis or matched_dbs)
 
-        has_implementation = bool(matched_apis or matched_uis or matched_dbs)
+            f_node = GraphNode(
+                id=next_id(NodeType.FEATURE),
+                node_type=NodeType.FEATURE,
+                name=feat_text[:60],
+                metadata={
+                    "matched_api_count": len(matched_apis),
+                    "matched_ui_count": len(matched_uis),
+                    "matched_db_count": len(matched_dbs),
+                    "has_implementation": has_implementation,
+                    "cluster_type": "EXPLICIT_SPECIFICATION",
+                },
+            )
+            graph.add_node(f_node)
+            features.append(f_node)
+    else:
+        # 3. Derive Features dynamically from discovered API prefixes & UI components
+        route_clusters: dict[str, list[GraphNode]] = defaultdict(list)
+        for a in api_nodes:
+            path = a.metadata.get("path", a.name).strip("/")
+            prefix = path.split("/")[0] if "/" in path else path
+            if prefix in {"api", "v1", "v2"} and "/" in path:
+                parts = path.split("/")
+                prefix = parts[1] if len(parts) > 1 else parts[0]
+            route_clusters[prefix].append(a)
 
-        f_node = GraphNode(
-            id=next_id(NodeType.FEATURE),
-            node_type=NodeType.FEATURE,
-            name=feat_name,
-            metadata={
-                "matched_api_count": len(matched_apis),
-                "matched_ui_count": len(matched_uis),
-                "matched_db_count": len(matched_dbs),
-                "has_implementation": has_implementation,
-                "cluster_type": "DERIVED_FROM_REQUIREMENTS" if requirements else "DERIVED_FROM_CODEBASE",
-            },
-        )
-        graph.add_node(f_node)
-        features.append(f_node)
+        for prefix, cluster in route_clusters.items():
+            feat_name = f"{prefix.replace('-', ' ').replace('_', ' ').title()} Management"
+            matched_uis = [u for u in ui_nodes if prefix.lower() in u.name.lower() or prefix.lower() in u.metadata.get("file", "").lower()]
+            matched_dbs = [d for d in db_nodes if prefix.lower() in d.name.lower()]
+
+            f_node = GraphNode(
+                id=next_id(NodeType.FEATURE),
+                node_type=NodeType.FEATURE,
+                name=feat_name,
+                metadata={
+                    "matched_api_count": len(cluster),
+                    "matched_ui_count": len(matched_uis),
+                    "matched_db_count": len(matched_dbs),
+                    "has_implementation": True,
+                    "cluster_type": "INFERRED_FROM_ROUTES",
+                },
+            )
+            graph.add_node(f_node)
+            features.append(f_node)
+
+        # Fallback if no routes found but UI exists
+        if not features and ui_nodes:
+            f_node = GraphNode(
+                id=next_id(NodeType.FEATURE),
+                node_type=NodeType.FEATURE,
+                name="Frontend Application Interface",
+                metadata={
+                    "matched_api_count": 0,
+                    "matched_ui_count": len(ui_nodes),
+                    "matched_db_count": len(db_nodes),
+                    "has_implementation": True,
+                    "cluster_type": "INFERRED_FROM_UI",
+                },
+            )
+            graph.add_node(f_node)
+            features.append(f_node)
 
     return features, requirements

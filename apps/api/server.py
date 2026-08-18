@@ -1,7 +1,6 @@
 """
-Standalone HTTP & REST API Server for AI Production Audit Platform.
-Built on Python's standard library (zero external dependencies required)
-with full JSON API + Multi-Project Intake + Static Web Dashboard support.
+Launcher & REST API Server for AI Production Audit Platform.
+Runs canonical FastAPI + Uvicorn if installed, or zero-dependency stdlib HTTPServer.
 """
 from __future__ import annotations
 
@@ -14,34 +13,20 @@ from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT_DIR))
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from packages.intake import ProjectRegistry, SourceType
 from packages.orchestration import AgentRegistry
+from workers.audit_orchestrator import run_full_audit
 
 WEB_DIR = ROOT_DIR / "apps" / "web"
 FIXTURE_DEFAULT_REPO = ROOT_DIR / "tests" / "fixtures" / "sample_career_app"
-
 PROJECT_REGISTRY = ProjectRegistry()
 AGENT_REGISTRY = AgentRegistry()
-INITIALIZED_BENCHMARK = False
-
-
-def ensure_initial_setup() -> None:
-    global INITIALIZED_BENCHMARK
-    if not INITIALIZED_BENCHMARK and FIXTURE_DEFAULT_REPO.exists():
-        prj = PROJECT_REGISTRY.register_project(
-            name="Career Platform Benchmark",
-            source_type=SourceType.LOCAL_DIRECTORY,
-            source_location=FIXTURE_DEFAULT_REPO,
-            is_benchmark=True,
-        )
-        PROJECT_REGISTRY.run_audit_for_project(prj.project_id)
-        INITIALIZED_BENCHMARK = True
-
 
 FORBIDDEN_SYSTEM_PATHS = {
-    "/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin",
+    "/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin", "/home", "/users",
     "c:\\", "c:\\windows", "c:\\program files", "c:\\program files (x86)", "c:\\users",
     "c:/", "c:/windows", "c:/program files", "c:/program files (x86)", "c:/users",
 }
@@ -54,11 +39,10 @@ def validate_safe_repo_path(raw_path: str) -> tuple[bool, Optional[Path], str]:
     clean_raw = str(raw_path).strip().lower().replace("/", "\\")
     clean_posix = str(raw_path).strip().lower().replace("\\", "/")
 
-    # Cross-platform check before resolve()
     if clean_posix in ("/", "/etc", "/proc", "/sys", "/dev", "/root", "/var", "/usr", "/bin", "/sbin", "/home", "/users") or \
        clean_posix.startswith(("/etc/", "/proc/", "/sys/", "/dev/", "/root/")) or \
        clean_raw in ("c:\\", "c:", "c:\\windows", "c:\\users", "c:\\users\\", "c:\\program files") or \
-       clean_raw.startswith(("c:\\windows", "\\\\", "..")):
+       clean_raw.startswith(("c:\\windows\\", "c:\\program files\\")):
         return False, None, "Access to root or system directory is blocked for security."
 
     try:
@@ -66,203 +50,144 @@ def validate_safe_repo_path(raw_path: str) -> tuple[bool, Optional[Path], str]:
     except Exception as e:
         return False, None, f"Invalid path syntax: {e}"
 
-    if not resolved.exists():
-        return False, None, f"Target file/folder does not exist: {resolved}"
+    if str(resolved).lower().rstrip("/\\") in FORBIDDEN_SYSTEM_PATHS or resolved == resolved.parent:
+        return False, None, "Access to root or system directory is blocked for security."
+
+    if not resolved.exists() or not resolved.is_dir():
+        return False, None, f"Repository directory does not exist or is not a folder: {resolved}"
 
     return True, resolved, ""
 
 
-class AuditRequestHandler(BaseHTTPRequestHandler):
-    def send_json(self, data: dict | list, status_code: int = 200) -> None:
-        payload = json.dumps(data).encode("utf-8")
-        self.send_response(status_code)
+class ZeroDependencyHandler(BaseHTTPRequestHandler):
+    def _send_json(self, data: Any, status: int = 200) -> None:
+        payload = json.dumps(data, indent=2).encode("utf-8")
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.send_header("Pragma", "no-cache")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
         self.wfile.write(payload)
 
-    def send_static(self, file_path: Path) -> None:
-        if not file_path.exists() or not file_path.is_file():
-            self.send_response(404)
-            self.end_headers()
-            self.wfile.write(b"404 Not Found")
-            return
-
-        content_type, _ = mimetypes.guess_type(str(file_path))
-        content = file_path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", content_type or "application/octet-stream")
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.send_header("Pragma", "no-cache")
-        self.end_headers()
-        self.wfile.write(content)
-
-    def do_HEAD(self) -> None:
-        self.do_GET()
-
     def do_OPTIONS(self) -> None:
-        self.send_response(200)
+        self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
     def do_GET(self) -> None:
-        ensure_initial_setup()
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
-        if not path:
-            path = "/"
 
-        # Static assets
-        if path in ("/", "/index.html"):
-            self.send_static(WEB_DIR / "index.html")
-            return
-        elif path.startswith("/static/"):
-            rel_file = path.replace("/static/", "")
-            self.send_static(WEB_DIR / rel_file)
-            return
-
-        # Multi-Project APIs
         if path == "/api/projects":
-            self.send_json(PROJECT_REGISTRY.list_projects())
-            return
-
-        # Latest Audit summary
-        latest_audit = PROJECT_REGISTRY.get_latest_audit()
-
-        if path == "/api/audits/latest":
-            self.send_json(latest_audit.summary if latest_audit else {})
-            return
-        elif path == "/api/audits/graph":
-            if latest_audit and latest_audit.audit_id in PROJECT_REGISTRY.audit_graphs:
-                g = PROJECT_REGISTRY.audit_graphs[latest_audit.audit_id]
-                self.send_json({
-                    "nodes": [n.to_dict() for n in g.nodes.values()],
-                    "edges": [e.to_dict() for e in g.edges],
-                    "counts": g.counts_by_type(),
-                })
+            self._send_json({
+                "projects": [p.to_dict() for p in PROJECT_REGISTRY.projects.values()],
+                "audit_runs": [a.to_dict() for a in PROJECT_REGISTRY.audit_runs.values()],
+            })
+        elif path == "/api/audits/latest" or path == "/api/audits/summary":
+            if not PROJECT_REGISTRY.audit_runs:
+                if FIXTURE_DEFAULT_REPO.exists():
+                    p = PROJECT_REGISTRY.register_project("Career Platform Benchmark", SourceType.LOCAL_DIRECTORY, FIXTURE_DEFAULT_REPO, is_benchmark=True)
+                    PROJECT_REGISTRY.run_audit_for_project(p.project_id)
+            latest_id = list(PROJECT_REGISTRY.audit_runs.keys())[-1] if PROJECT_REGISTRY.audit_runs else None
+            if latest_id:
+                self._send_json(PROJECT_REGISTRY.audit_runs[latest_id].summary)
             else:
-                self.send_json({"nodes": [], "edges": [], "counts": {}})
-            return
-        elif path == "/api/audits/checks":
-            if latest_audit and latest_audit.audit_id in PROJECT_REGISTRY.audit_graphs:
-                g = PROJECT_REGISTRY.audit_graphs[latest_audit.audit_id]
-                self.send_json([c.to_dict() for c in g.audit_checks.values()])
+                self._send_json({"error": "No audit data"}, 404)
+        elif path == "/api/graph" or path == "/api/audits/graph":
+            latest_id = list(PROJECT_REGISTRY.audit_graphs.keys())[-1] if PROJECT_REGISTRY.audit_graphs else None
+            if latest_id:
+                self._send_json(PROJECT_REGISTRY.audit_graphs[latest_id].to_dict())
             else:
-                self.send_json([])
-            return
-        elif path == "/api/audits/evidence":
-            if latest_audit and latest_audit.audit_id in PROJECT_REGISTRY.audit_evidence_stores:
-                ev = PROJECT_REGISTRY.audit_evidence_stores[latest_audit.audit_id]
-                self.send_json(ev.to_dict_list())
+                self._send_json({"error": "No graph data"}, 404)
+        elif path == "/api/evidence" or path == "/api/audits/evidence":
+            latest_id = list(PROJECT_REGISTRY.audit_evidence_stores.keys())[-1] if PROJECT_REGISTRY.audit_evidence_stores else None
+            if latest_id:
+                self._send_json(PROJECT_REGISTRY.audit_evidence_stores[latest_id].to_dict())
             else:
-                self.send_json([])
-            return
-        elif path.startswith("/api/audits/"):
-            audit_id = path.replace("/api/audits/", "")
-            audit = PROJECT_REGISTRY.audit_runs.get(audit_id)
-            if audit:
-                self.send_json(audit.summary)
-            else:
-                self.send_json({"error": "Audit not found"}, status_code=404)
-            return
-        elif path == "/api/platform/agents":
-            self.send_json([agent.to_dict() for agent in AGENT_REGISTRY.all()])
-            return
+                self._send_json({"error": "No evidence data"}, 404)
+        elif path == "/api/agents":
+            self._send_json({
+                "agents": [a.to_dict() for a in AGENT_REGISTRY.all()],
+                "proposals": [p.to_dict() for p in AGENT_REGISTRY.get_proposals()],
+            })
         else:
-            self.send_response(404)
-            self.end_headers()
-            self.wfile.write(b"Not Found")
+            # Serve Static Web UI
+            rel_path = path.lstrip("/")
+            file_path = WEB_DIR / (rel_path if rel_path and rel_path != "static" else "index.html")
+            if rel_path.startswith("static/"):
+                file_path = WEB_DIR / rel_path[7:]
+
+            if not file_path.exists() or file_path.is_dir():
+                file_path = WEB_DIR / "index.html"
+
+            if file_path.exists() and file_path.is_file():
+                mime, _ = mimetypes.guess_type(str(file_path))
+                mime = mime or "application/octet-stream"
+                content = file_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+            else:
+                self._send_json({"error": "Not Found"}, 404)
 
     def do_POST(self) -> None:
-        ensure_initial_setup()
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+        content_len = int(self.headers.get("Content-Length", 0))
+        body_bytes = self.rfile.read(content_len) if content_len > 0 else b"{}"
 
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length) if length > 0 else b"{}"
         try:
-            data = json.loads(body.decode("utf-8"))
+            body = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
         except Exception:
-            data = {}
+            body = {}
 
         if path == "/api/projects":
-            # Register a new project and immediately audit it
-            name = data.get("name", "Custom Project")
-            src_type_str = data.get("source_type", "LOCAL_DIRECTORY")
-            raw_path = data.get("source_location", "")
-
-            is_valid, target_path, err_msg = validate_safe_repo_path(raw_path)
+            name = body.get("name", "Unnamed Project")
+            src_type = body.get("source_type", "LOCAL_DIRECTORY")
+            src_loc = body.get("source_location", "")
+            is_valid, resolved_p, err = validate_safe_repo_path(src_loc)
             if not is_valid:
-                self.send_json({"error": err_msg}, status_code=400)
+                self._send_json({"error": err}, 400)
                 return
-
-            try:
-                src_type = SourceType(src_type_str)
-            except Exception:
-                src_type = SourceType.LOCAL_DIRECTORY
-
-            prj = PROJECT_REGISTRY.register_project(
-                name=name,
-                source_type=src_type,
-                source_location=target_path,
-                is_benchmark=False,
-            )
-            audit_run = PROJECT_REGISTRY.run_audit_for_project(prj.project_id)
-            self.send_json({
-                "project": prj.to_dict(),
-                "audit": audit_run.to_dict(),
-            })
-            return
-
+            prj = PROJECT_REGISTRY.register_project(name, src_type, resolved_p)
+            audit = PROJECT_REGISTRY.run_audit_for_project(prj.project_id)
+            self._send_json({"project": prj.to_dict(), "audit": audit.to_dict()}, 200)
         elif path.startswith("/api/projects/") and path.endswith("/audits"):
-            parts = path.split("/")
-            project_id = parts[3]
-            try:
-                audit_run = PROJECT_REGISTRY.run_audit_for_project(project_id)
-                self.send_json(audit_run.to_dict())
-            except Exception as e:
-                self.send_json({"error": str(e)}, status_code=400)
-            return
-
-        elif path == "/api/audits/run":
-            raw_path = data.get("repo_path")
-            is_valid, target_repo, err_msg = validate_safe_repo_path(raw_path)
+            parts = path.strip("/").split("/")
+            prj_id = parts[2]
+            if prj_id in PROJECT_REGISTRY.projects:
+                audit = PROJECT_REGISTRY.run_audit_for_project(prj_id)
+                self._send_json(audit.to_dict(), 200)
+            else:
+                self._send_json({"error": f"Project '{prj_id}' not found"}, 404)
+        elif path in ("/api/audits/run", "/api/audits/re-audit"):
+            target_repo = body.get("repo_path", "")
+            is_valid, resolved_p, err = validate_safe_repo_path(target_repo)
             if not is_valid:
-                self.send_json({"error": err_msg}, status_code=400)
+                self._send_json({"error": err}, 400)
                 return
-
-            prj_name = target_repo.name if target_repo else "Audited Project"
-            prj = PROJECT_REGISTRY.register_project(
-                name=prj_name,
-                source_type=SourceType.LOCAL_DIRECTORY,
-                source_location=target_repo,
-                is_benchmark=False,
-            )
-            audit_run = PROJECT_REGISTRY.run_audit_for_project(prj.project_id)
-            self.send_json(audit_run.summary)
-            return
-
+            prj_name = resolved_p.name.replace("_", " ").title()
+            prj = PROJECT_REGISTRY.register_project(prj_name, SourceType.LOCAL_DIRECTORY, resolved_p)
+            audit = PROJECT_REGISTRY.run_audit_for_project(prj.project_id)
+            self._send_json(audit.summary, 200)
         else:
-            self.send_response(404)
-            self.end_headers()
-
-
-def run_server(port: int = 8080) -> None:
-    ensure_initial_setup()
-    server_address = ("127.0.0.1", port)
-    httpd = HTTPServer(server_address, AuditRequestHandler)
-    print(f"[*] AI Production Audit Platform Dashboard running at http://127.0.0.1:{port}")
-    httpd.serve_forever()
+            self._send_json({"error": "Unknown POST endpoint"}, 404)
 
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
-    run_server(port)
+    try:
+        import uvicorn
+        from apps.api.main import app as fastapi_app
+        print(f"Starting Project Graph Canonical FastAPI on http://0.0.0.0:{port}")
+        uvicorn.run(fastapi_app, host="0.0.0.0", port=port)
+    except ImportError:
+        print(f"Starting Project Graph Standalone HTTP Server on http://0.0.0.0:{port}")
+        server = HTTPServer(("0.0.0.0", port), ZeroDependencyHandler)
+        server.serve_forever()

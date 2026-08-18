@@ -40,6 +40,7 @@ from packages.discovery import (
 from packages.evidence import EvidenceStore, ReproducibilityEngine
 from packages.intelligence import (
     AdversarialReviewer,
+    ApplicabilityEngine,
     ArchitectureAuditor,
     CertificationState,
     CompletenessEngine,
@@ -86,6 +87,11 @@ def run_full_audit(repo_path: str | Path) -> tuple[ProjectGraph, EvidenceStore, 
     # 3. Product & Architecture Understanding
     understanding_engine = SystemUnderstandingEngine(graph)
     product_understanding = understanding_engine.analyze(fingerprint)
+
+    # 3b. Generic Applicability & Capability Discovery
+    applicability_engine = ApplicabilityEngine(graph)
+    discovered_caps = applicability_engine.discover_capabilities()
+    applicable_reqs = applicability_engine.derive_applicable_requirements()
 
     # 4. Generate Check Obligations & Tasks
     build_audit_task_manifest(graph)
@@ -145,6 +151,10 @@ def run_full_audit(repo_path: str | Path) -> tuple[ProjectGraph, EvidenceStore, 
         "repo_path": str(repo_path),
         "fingerprint": fingerprint.to_dict(),
         "product_understanding": product_understanding,
+        "applicability": {
+            "capabilities": {k.value: v.__dict__ for k, v in discovered_caps.items()},
+            "applicable_requirements": [r.__dict__ for r in applicable_reqs],
+        },
         "entity_counts": graph.counts_by_type(),
         "status_counts": graph.status_counts(),
         "verification_stats": verification_stats,

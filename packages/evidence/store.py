@@ -116,3 +116,17 @@ class EvidenceStore:
 
     def claims_to_dict_list(self) -> list[dict]:
         return [c.to_dict() for c in self._claims.values()]
+
+    def compute_vault_merkle_root(self) -> str:
+        hashes = [e.sha256_hash for e in sorted(self._records.values(), key=lambda x: x.id)]
+        if not hashes:
+            return hashlib.sha256(b"empty_vault").hexdigest()
+        combined = "\n".join(hashes)
+        return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+    def to_dict(self) -> dict:
+        return {
+            "records": [e.to_dict() for e in self._records.values()],
+            "claims": [c.to_dict() for c in self._claims.values()],
+            "merkle_root": self.compute_vault_merkle_root(),
+        }

@@ -129,7 +129,8 @@ async function loadProjects(selectProjectId = null) {
   try {
     const res = await fetch('/api/projects', { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to load projects');
-    PROJECTS_LIST = await res.json();
+    const data = await res.json();
+    PROJECTS_LIST = Array.isArray(data) ? data : (data.projects || []);
 
     const selector = document.getElementById('project-selector');
     if (selector) {
@@ -168,7 +169,7 @@ async function fetchAuditData() {
     AUDIT_DATA = await res.json();
     populateDashboard(AUDIT_DATA);
 
-    const graphRes = await fetch('/api/audits/graph', { cache: 'no-store' });
+    const graphRes = await fetch('/api/graph', { cache: 'no-store' });
     if (graphRes.ok) {
       GRAPH_DATA = await graphRes.json();
     }
