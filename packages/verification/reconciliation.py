@@ -56,16 +56,24 @@ class ReconciliationEngine:
         for node in static_ui_nodes:
             label = node.metadata.get("label", node.name).lower()
             name = node.name.lower()
-            # Check if selector or label appears in live dom
+            label_norm = label.replace("-", " ").replace("_", " ").replace(".", " ").replace("button:", "").replace("link:", "").strip()
+            name_norm = name.replace("-", " ").replace("_", " ").replace(".", " ").replace("button:", "").replace("link:", "").strip()
+
             is_matched = False
             for sel in live_dom_selectors:
                 s = sel.lower()
-                if s in label or label in s or s in name or name in s:
+                s_norm = s.replace("-", " ").replace("_", " ").replace(".", " ").replace("button:", "").replace("link:", "").strip()
+                if (
+                    label_norm in s_norm
+                    or s_norm in label_norm
+                    or name_norm in s_norm
+                    or s_norm in name_norm
+                ):
                     is_matched = True
                     break
                 # Handle JSX conditional text like "{loading ? 'Generating...' : 'Generate Resume'}"
-                cleaned_label = label.replace("{", "").replace("}", "").replace("'", "").replace('"', "")
-                if any(chunk.strip() and chunk.strip() in s for chunk in cleaned_label.split(":")):
+                cleaned_label = label_norm.replace("{", "").replace("}", "").replace("'", "").replace('"', "")
+                if any(chunk.strip() and len(chunk.strip()) > 3 and chunk.strip() in s_norm for chunk in cleaned_label.split(":")):
                     is_matched = True
                     break
 

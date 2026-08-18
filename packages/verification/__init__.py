@@ -2,6 +2,7 @@ from .api_runner import APIRunnerVerifier
 from .api_verifier import APIVerifier
 from .auth_verifier import AuthVerifier
 from .browser_lab import BrowserLaboratory
+from .browser_worker import BrowserAuditResult, BrowserFlowStepResult, PlaywrightVerificationWorker
 from .flow_engine import FlowStep, UserFlowAudit, UserFlowEngine
 from .identity_manager import AuthorizationProbe, IdentityFixtureManager, IdentityPersona
 from .reconciliation import ReconciliationDiscrepancy, ReconciliationEngine, ReconciliationReport
@@ -17,6 +18,9 @@ __all__ = [
     "APIRunnerVerifier",
     "TestRunnerVerifier",
     "BrowserLaboratory",
+    "PlaywrightVerificationWorker",
+    "BrowserAuditResult",
+    "BrowserFlowStepResult",
     "IdentityFixtureManager",
     "IdentityPersona",
     "AuthorizationProbe",
