@@ -1,8 +1,14 @@
 """
 Phase: UI DISCOVERY (spec Milestone 1 §10-12)
 
-Extracts UI interactive elements (BUTTON, LINK, FORM, INPUT, SELECT, TAB, MODAL)
-and analyzes attached handlers for dead button / dead interaction candidate detection.
+Extracts UI interactive elements:
+- Buttons (<button>, <Button>, <IconButton>, <* as="button">, <DialogTrigger>)
+- Navigation Links (<a>, <Link>, <NavLink>)
+- Forms & Inputs (<form>, <input>, <select>, <textarea>)
+- Containers & Dialogs (<Modal>, <Dialog>, <Tab>, <Drawer>)
+
+Captures attached event handlers, loading states, accessibility properties,
+and analyzes handler binding for dead interaction candidate detection.
 """
 from __future__ import annotations
 
@@ -13,21 +19,24 @@ from packages.project_graph.models import GraphNode, NodeType, next_id
 from packages.project_graph.store import ProjectGraph
 
 ELEMENT_PATTERNS = {
-    "BUTTON": re.compile(r"<button\b([^>]*)>(.*?)</button>", re.IGNORECASE | re.DOTALL),
-    "LINK": re.compile(r"<(?:a|Link|NavLink)\b([^>]*)>(.*?)</(?:a|Link|NavLink)>", re.IGNORECASE | re.DOTALL),
+    "BUTTON": re.compile(r"<(?:button|Button|IconButton|CustomButton|SubmitButton|PrimaryButton|SecondaryButton|ActionButton|DialogTrigger)\b([^>]*)>(.*?)</(?:button|Button|IconButton|CustomButton|SubmitButton|PrimaryButton|SecondaryButton|ActionButton|DialogTrigger)>", re.IGNORECASE | re.DOTALL),
+    "BUTTON_SELF_CLOSING": re.compile(r"<(?:Button|IconButton|CustomButton|SubmitButton|PrimaryButton|SecondaryButton|ActionButton|DialogTrigger)\b([^>]*?)/?>", re.IGNORECASE),
+    "LINK": re.compile(r"<(?:a|Link|NavLink|RouteLink)\b([^>]*)>(.*?)</(?:a|Link|NavLink|RouteLink)>", re.IGNORECASE | re.DOTALL),
     "FORM": re.compile(r"<form\b([^>]*)>(.*?)</form>", re.IGNORECASE | re.DOTALL),
-    "INPUT": re.compile(r"<input\b([^>]*)/?>", re.IGNORECASE),
-    "SELECT": re.compile(r"<select\b([^>]*)>(.*?)</select>", re.IGNORECASE | re.DOTALL),
-    "MODAL": re.compile(r"<(?:Modal|Dialog)\b([^>]*)>(.*?)</(?:Modal|Dialog)>", re.IGNORECASE | re.DOTALL),
-    "TAB": re.compile(r"<(?:Tab|TabItem)\b([^>]*)>(.*?)</(?:Tab|TabItem)>", re.IGNORECASE | re.DOTALL),
+    "INPUT": re.compile(r"<(?:input|TextInput|SearchInput)\b([^>]*)/?>", re.IGNORECASE),
+    "TEXTAREA": re.compile(r"<(?:textarea|TextArea)\b([^>]*)>(.*?)</(?:textarea|TextArea)>", re.IGNORECASE | re.DOTALL),
+    "SELECT": re.compile(r"<(?:select|Select|Dropdown)\b([^>]*)>(.*?)</(?:select|Select|Dropdown)>", re.IGNORECASE | re.DOTALL),
+    "MODAL": re.compile(r"<(?:Modal|Dialog|Drawer|Sheet)\b([^>]*)>(.*?)</(?:Modal|Dialog|Drawer|Sheet)>", re.IGNORECASE | re.DOTALL),
+    "TAB": re.compile(r"<(?:Tab|TabItem|Tabs\.Trigger)\b([^>]*)>(.*?)</(?:Tab|TabItem|Tabs\.Trigger)>", re.IGNORECASE | re.DOTALL),
 }
 
 HANDLER_ATTR = re.compile(
-    r"(?:onClick|onSubmit|onChange|onSelect|onKeyDown|onPress)\s*=\s*(?:{([^}]+)}|\"([^\"]+)\"|'([^']+)')",
+    r"(?:onClick|onSubmit|onChange|onSelect|onKeyDown|onPress|handleClick|handleSubmit)\s*=\s*(?:{([^}]+)}|\"([^\"]+)\"|'([^']+)')",
     re.IGNORECASE,
 )
-DISABLED_ATTR = re.compile(r"\bdisabled\b", re.IGNORECASE)
+DISABLED_ATTR = re.compile(r"\b(?:disabled|isDisabled|aria-disabled=[\"'{]true)\b", re.IGNORECASE)
 HREF_ATTR = re.compile(r"(?:href|to)\s*=\s*(?:{([^}]+)}|\"([^\"]+)\"|'([^']+)')", re.IGNORECASE)
+TYPE_ATTR = re.compile(r"type=[\"']([^\"']+)[\"']", re.IGNORECASE)
 LABEL_TAG_STRIP = re.compile(r"<[^>]+>")
 
 
@@ -44,14 +53,23 @@ def _discover_in_file(path: Path, rel_name: str, graph: ProjectGraph) -> list[Gr
     except OSError:
         return out
 
+    seen_positions: set[int] = set()
+
     for el_type, pattern in ELEMENT_PATTERNS.items():
+        base_type = "BUTTON" if "BUTTON" in el_type else el_type
         for m in pattern.finditer(text):
+            pos = m.start()
+            if pos in seen_positions:
+                continue
+            seen_positions.add(pos)
+
             attrs = m.group(1) or ""
             inner = m.group(2) if m.lastindex and m.lastindex >= 2 else ""
 
             handler_match = HANDLER_ATTR.search(attrs)
             disabled_match = DISABLED_ATTR.search(attrs)
             href_match = HREF_ATTR.search(attrs)
+            type_match = TYPE_ATTR.search(attrs)
 
             handler_name = None
             if handler_match:
@@ -75,51 +93,66 @@ def _discover_in_file(path: Path, rel_name: str, graph: ProjectGraph) -> list[Gr
 
             label = _clean_label(inner)
             if not label:
-                # Check for aria-label or placeholder
+                # Check for aria-label, title, placeholder, or name
                 aria_m = re.search(r"aria-label=[\"']([^\"']+)[\"']", attrs, re.IGNORECASE)
                 placeholder_m = re.search(r"placeholder=[\"']([^\"']+)[\"']", attrs, re.IGNORECASE)
                 name_m = re.search(r"name=[\"']([^\"']+)[\"']", attrs, re.IGNORECASE)
+                title_m = re.search(r"title=[\"']([^\"']+)[\"']", attrs, re.IGNORECASE)
                 if aria_m:
                     label = aria_m.group(1)
                 elif placeholder_m:
                     label = placeholder_m.group(1)
+                elif title_m:
+                    label = title_m.group(1)
                 elif name_m:
                     label = f"field:{name_m.group(1)}"
                 else:
-                    label = f"(anonymous {el_type.lower()})"
+                    label = f"(anonymous {base_type.lower()})"
 
-            # A button without handler or a link with href="#" is a dead control candidate
+            # Interactive control handler validity
             has_handler = bool(handler_name) or bool(href_target and href_target != "#" and href_target != "")
+            
+            # Form submission or submit button inherits form handler
+            if type_match and type_match.group(1).lower() == "submit" and not has_handler:
+                # Inherits form submission in the component
+                has_handler = bool(re.search(r"onSubmit\s*=", text, re.IGNORECASE))
+                if has_handler and not handler_name:
+                    handler_name = "form.onSubmit"
 
             node = GraphNode(
                 id=next_id(NodeType.UI_ELEMENT),
                 node_type=NodeType.UI_ELEMENT,
-                name=f"{el_type}: {label}",
+                name=f"{base_type}: {label}",
                 metadata={
-                    "element_type": el_type,
+                    "element_type": base_type,
                     "label": label,
                     "file": rel_name,
                     "line": line_no,
-                    "has_handler": has_handler,
                     "handler_name": handler_name,
                     "href_target": href_target,
-                    "disabled": bool(disabled_match),
-                    "discovery_method": "static",
-                    "runtime_verified": False,
+                    "has_handler": has_handler,
+                    "is_disabled": bool(disabled_match),
+                    "input_type": type_match.group(1) if type_match else None,
+                    "has_loading_feedback": bool(re.search(r"(?:loading|isPending|spinner|disabled={loading)", text, re.IGNORECASE)),
+                    "has_error_feedback": bool(re.search(r"(?:error|toast|alert|setError|isError)", text, re.IGNORECASE)),
                 },
             )
             graph.add_node(node)
             out.append(node)
+
     return out
 
 
 def discover_ui_elements(root: Path, graph: ProjectGraph) -> list[GraphNode]:
-    discovered: list[GraphNode] = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.suffix not in {".jsx", ".tsx", ".html", ".vue", ".svelte"}:
-            continue
-        if any(seg in {".git", "node_modules", "dist", "build", ".next"} for seg in path.parts):
-            continue
-        rel_path = str(path.relative_to(root)).replace("\\", "/")
-        discovered += _discover_in_file(path, rel_path, graph)
-    return discovered
+    results: list[GraphNode] = []
+    extensions = {".tsx", ".jsx", ".vue", ".svelte", ".html", ".js", ".ts"}
+
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in extensions:
+            if any(part in ("node_modules", ".git", "dist", "build", ".next", "__pycache__") for part in p.parts):
+                continue
+            rel_path = str(p.relative_to(root)).replace("\\", "/")
+            elements = _discover_in_file(p, rel_path, graph)
+            results.extend(elements)
+
+    return results

@@ -65,6 +65,9 @@ class ProjectGraph:
             node.refresh_audit_status(self.get_checks_for_target(node.id))
 
     # -- queries --------------------------------------------------------
+    def all_nodes(self) -> list[GraphNode]:
+        return list(self.nodes.values())
+
     def get_node(self, node_id: str) -> Optional[GraphNode]:
         return self.nodes.get(node_id)
 
