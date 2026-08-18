@@ -80,7 +80,13 @@ class CrossCheckEngine:
             evs = self.evidence_store.find_by_target(api.id)
             auth_failures = [e for e in evs if "BOLA" in e.summary or "IDOR" in e.summary]
             if auth_failures:
-                ev_ids = [e.id for e in auth_failures]
+                has_runtime_ev = any(e.evidence_type == EvidenceType.AUTH_BOUNDARY_TEST for e in auth_failures)
+                ev_strength = "RUNTIME_OBSERVED" if has_runtime_ev else "STATIC_DATAFLOW_PROVEN"
+                observed = (
+                    "Live multi-identity request as User A successfully retrieved User B's private resource (200 OK)."
+                    if has_runtime_ev
+                    else "Static AST dataflow analysis confirms database query filters by resource parameter without tenancy scoping (e.g. missing user_id / owner_id filter)."
+                )
                 f = Finding(
                     id=f"FINDING-{finding_idx:04d}",
                     title=f"Broken Object-Level Authorization (BOLA / IDOR) on '{api.name}'",
@@ -91,21 +97,21 @@ class CrossCheckEngine:
                     affected_feature="Authorization & Access Control",
                     affected_nodes=[api.id],
                     description=f"Endpoint '{api.name}' accepts a resource identifier parameter without verifying that the authenticated user possesses ownership of that resource.",
-                    observed_behavior="Direct object reference can be queried by any authenticated or unauthenticated client without user ID tenancy scoping.",
+                    observed_behavior=observed,
                     expected_behavior="The backend must assert `resource.user_id == current_user.id` and reject unauthorized requests with HTTP 403 Forbidden.",
                     evidence_ids=ev_ids,
                     root_cause="Missing ownership assertion in database query filter or authorization middleware.",
                     recommendation="Add user tenancy check in the repository filter or query layer.",
                     reproduction_steps=[
-                        f"1. Send {api.metadata.get('method')} to {api.metadata.get('path')} as User A with User B's resource ID",
-                        "2. Observe server returning 200 OK with User B's private data instead of 403 Forbidden.",
+                        f"1. Static AST inspects route {api.metadata.get('path')}",
+                        "2. Observe query filter lacks user tenancy scoping constraint.",
                     ],
                 )
                 self.evidence_store.add_claim(
                     statement=f"Endpoint '{api.name}' permits cross-tenant object access without ownership tenancy validation.",
                     target_id=api.id,
                     evidence_ids=ev_ids,
-                    evidence_strength="RUNTIME_OBSERVED",
+                    evidence_strength=ev_strength,
                     status="CONFIRMED",
                 )
                 self.graph.add_finding(f)

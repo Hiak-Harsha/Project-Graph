@@ -111,7 +111,8 @@ class APIRunnerVerifier:
                 auth_dec_check.unverified_reason = "Authentication requirement is not explicitly encoded in route decorators."
 
         # 2. Static AST Data-Flow Analysis for BOLA / IDOR
-        is_parameterized = "{" in route_path or ":" in route_path
+        is_catch_all = any(k in route_path.lower() for k in ("{full_path", "{path:", "static", "assets", "public", "*", "openapi", "docs"))
+        is_parameterized = ("{" in route_path or ":" in route_path) and not is_catch_all
         has_static_bola_flaw = False
         if is_parameterized:
             has_static_bola_flaw = self._analyze_ast_bola(file_rel, meta.get("handler_name", ""))

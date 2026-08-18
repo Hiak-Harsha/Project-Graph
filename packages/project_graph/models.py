@@ -303,6 +303,6 @@ class Finding:
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        d["category"] = self.category.value
-        d["severity"] = self.severity.value
+        d["category"] = self.category.value if hasattr(self.category, "value") else str(self.category)
+        d["severity"] = self.severity.value if hasattr(self.severity, "value") else str(self.severity)
         return d

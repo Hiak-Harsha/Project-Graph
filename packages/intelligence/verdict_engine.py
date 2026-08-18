@@ -1,19 +1,25 @@
 """
-Production Certification & Verdict Engine (spec Milestone 3 §14, §27)
+Production Certification Verdict Engine (spec Milestone 3 §23 / P1 / P2 / P4 / P5)
 
-Implements the formal 5-State Certification Model and the 7 Production Release Gates:
-- NOT_AUDITABLE
-- PARTIALLY_AUDITED
-- AUDITED_NOT_PRODUCTION_READY
-- AUDITED_READY_WITH_CONDITIONS
-- AUDITED_PRODUCTION_READY
+Evaluates the 7 mandatory release gates against the verified Project Graph,
+evidence vault, and finding records, producing the definitive 5-state certification verdict:
+1. NOT_AUDITABLE (obstructed discovery, syntax corruption)
+2. PARTIALLY_AUDITED (unverified obligations, missing runtime sandbox)
+3. AUDITED_NOT_PRODUCTION_READY (confirmed Critical/High blockers)
+4. AUDITED_READY_WITH_CONDITIONS (minor warnings, non-blocking gaps)
+5. AUDITED_PRODUCTION_READY (100% obligations resolved, zero blockers, all 7 gates passed)
 """
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
-from packages.project_graph.models import AuditStatus, CheckStatus, FindingCategory, Severity
+from packages.evidence import EvidenceStore, EvidenceValidator
+from packages.project_graph.models import (
+    CheckStatus,
+    FindingCategory,
+    Severity,
+)
 from packages.project_graph.store import ProjectGraph
 
 
@@ -26,47 +32,47 @@ class CertificationState(str, Enum):
 
 
 class VerdictEngine:
-    def __init__(self, graph: ProjectGraph, evidence_store: Optional[Any] = None) -> None:
+    def __init__(self, graph: ProjectGraph, evidence_store: Optional[EvidenceStore] = None) -> None:
         self.graph = graph
         self.evidence_store = evidence_store
 
     def compute_verdict(self) -> dict[str, Any]:
+        return self.evaluate_certification()
+
+    def evaluate_certification(self) -> dict[str, Any]:
         findings = list(self.graph.findings.values())
+        report = self.graph.completeness_report()
+
+        discovered_entities = report.get("discovered_entities", 0)
+        accounted_entities = report.get("terminal_entities", 0) + report.get("unverified_entities", 0)
+        discovery_complete = (discovered_entities > 0) and (accounted_entities == discovered_entities)
+
+        total_checks = report.get("total_check_obligations", 0)
+        passed_checks = report.get("passed_check_obligations", 0)
+        failed_checks = report.get("failed_check_obligations", 0)
+        unverified_checks = report.get("unverified_check_obligations", 0)
+        blocked_checks = report.get("blocked_check_obligations", 0)
+        error_checks = report.get("error_check_obligations", 0)
+        pending_checks = report.get("pending_check_obligations", 0)
+
+        required_checks = [c for c in self.graph.audit_checks.values() if c.required]
+        unresolved_required_checks = [
+            c for c in required_checks
+            if c.status in (CheckStatus.UNVERIFIED, CheckStatus.BLOCKED, CheckStatus.ERROR, CheckStatus.PENDING)
+        ]
 
         critical_count = sum(1 for f in findings if f.severity == Severity.CRITICAL and f.status == "CONFIRMED")
         high_count = sum(1 for f in findings if f.severity == Severity.HIGH and f.status == "CONFIRMED")
         medium_count = sum(1 for f in findings if f.severity == Severity.MEDIUM and f.status == "CONFIRMED")
         low_count = sum(1 for f in findings if f.severity == Severity.LOW and f.status == "CONFIRMED")
 
-        # Check obligation accounting
-        checks = list(self.graph.audit_checks.values())
-        total_checks = len(checks)
-        passed_checks = sum(1 for c in checks if c.status == CheckStatus.PASSED)
-        failed_checks = sum(1 for c in checks if c.status == CheckStatus.FAILED)
-        unverified_checks = sum(1 for c in checks if c.status == CheckStatus.UNVERIFIED)
-        blocked_checks = sum(1 for c in checks if c.status == CheckStatus.BLOCKED)
-        error_checks = sum(1 for c in checks if c.status == CheckStatus.ERROR)
-        pending_checks = sum(1 for c in checks if c.status in (CheckStatus.PENDING, CheckStatus.RUNNING))
+        runtime_cov = report.get("runtime_coverage_pct", 0.0)
 
-        unresolved_required_checks = [
-            c for c in checks
-            if c.required and c.status in (CheckStatus.UNVERIFIED, CheckStatus.BLOCKED, CheckStatus.ERROR, CheckStatus.PENDING, CheckStatus.RUNNING)
-        ]
-
-        # Completeness & coverage metrics
-        completeness = self.graph.completeness_report()
-        discovered_entities = completeness.get("discovered_entities", 0)
-        accounted_entities = completeness.get("terminal_entities", 0) + completeness.get("unverified_entities", 0)
-        discovery_complete = (accounted_entities == discovered_entities) and discovered_entities > 0
-        runtime_cov = completeness.get("runtime_coverage_pct", 0.0)
-
-        # -------------------------------------------------------------
-        # THE 7 PRODUCTION RELEASE GATES
-        # -------------------------------------------------------------
+        # Evaluate the 7 Mandatory Release Gates
         gates: list[dict[str, Any]] = []
 
         # Gate 1: Discovery Completeness
-        file_universe = self.graph.metadata.get("file_discovery_universe", {})
+        file_universe = self.graph.metadata.get("file_discovery_universe", self.graph.metadata.get("file_universe", {}))
         is_truncated = bool(file_universe.get("discovery_truncated", False))
         g1_pass = discovery_complete and (accounted_entities >= 10 if discovered_entities >= 10 else True) and not is_truncated
         g1_details = f"{accounted_entities}/{discovered_entities} entities accounted for."
@@ -102,7 +108,6 @@ class VerdictEngine:
         })
 
         # Gate 4: Runtime Sandbox Execution
-        # Runtime verification is required for web/API projects
         g4_pass = (runtime_cov > 50.0)
         gates.append({
             "gate_id": "GATE-4-RUNTIME-EXECUTION",
@@ -112,7 +117,7 @@ class VerdictEngine:
             "details": f"Runtime coverage: {runtime_cov}% (Requires > 50% for certification).",
         })
 
-        # Gate 5: Evidence Provenance & Cryptographic Backing
+        # Gate 5: Evidence Provenance & Cryptographic Backing (Validated via EvidenceValidator)
         confirmed_findings = [f for f in findings if f.status == "CONFIRMED"]
         invalid_evidence_findings: list[str] = []
 
@@ -123,10 +128,9 @@ class VerdictEngine:
             if self.evidence_store:
                 for ev_id in f.evidence_ids:
                     rec = self.evidence_store.get(ev_id)
-                    if rec is None:
-                        invalid_evidence_findings.append(f"{f.id} (Evidence {ev_id} missing from vault)")
-                    elif not rec.sha256_hash or len(rec.sha256_hash) != 64:
-                        invalid_evidence_findings.append(f"{f.id} (Evidence {ev_id} missing valid 64-hex SHA-256)")
+                    val_res = EvidenceValidator.validate_record(rec)
+                    if not val_res.is_valid:
+                        invalid_evidence_findings.append(f"{f.id} (Evidence {ev_id}: {val_res.details})")
 
         g5_pass = (len(invalid_evidence_findings) == 0) and (len(findings) == 0 or len(confirmed_findings) > 0)
         gates.append({
@@ -152,9 +156,11 @@ class VerdictEngine:
         repro_data = self.graph.metadata.get("reproducibility", {})
         has_revision = bool(repro_data.get("revision_id") or repro_data.get("commit_sha"))
         has_merkle = bool(repro_data.get("file_inventory_hash")) and len(repro_data.get("file_inventory_hash", "")) == 64
-        has_replay = bool(repro_data.get("replay_token")) and len(repro_data.get("replay_token", "")) == 64
         
-        # Strict rule: Missing or malformed reproducibility data FAILS Gate 7
+        token_str = repro_data.get("replay_token", "")
+        token_hex = token_str[4:] if token_str.startswith("RPL-") else token_str
+        has_replay = bool(token_hex) and len(token_hex) == 64 and all(c in "0123456789abcdefABCDEF" for c in token_hex)
+        
         g7_pass = bool(repro_data) and has_revision and has_merkle and has_replay
         
         merkle_digest = repro_data.get("file_inventory_hash", "")[:16] if has_merkle else ""
@@ -219,17 +225,26 @@ class VerdictEngine:
         score_arch = domain_score(FindingCategory.ARCHITECTURE)
         score_requirements = domain_score(FindingCategory.MISSING_REQUIREMENT)
 
-        overall = round(
-            (
-                score_security * 0.25
-                + score_reliability * 0.20
-                + score_testing * 0.15
-                + score_ux * 0.15
-                + score_arch * 0.15
-                + score_requirements * 0.10
-            ),
-            1,
+        # Calibrate overall readiness score against passed gates and unresolved obligations
+        passed_gate_count = sum(1 for g in gates if g["passed"])
+        gate_factor = passed_gate_count / 7.0
+        
+        raw_overall = (
+            score_security * 0.25
+            + score_reliability * 0.20
+            + score_testing * 0.15
+            + score_ux * 0.15
+            + score_arch * 0.15
+            + score_requirements * 0.10
         )
+        
+        # When critical gates fail (e.g. security or reproducibility or runtime), scale accordingly
+        if critical_count > 0:
+            overall = min(5.0, round(raw_overall * 0.6, 1))
+        elif passed_gate_count < 5:
+            overall = min(7.5, round(raw_overall * (gate_factor * 0.5 + 0.5), 1))
+        else:
+            overall = round(raw_overall, 1)
 
         # Extract Top Blockers
         sorted_findings = sorted(

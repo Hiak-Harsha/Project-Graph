@@ -9,7 +9,7 @@ A skeptical auditor pass that formally challenges every candidate finding:
 from __future__ import annotations
 
 from packages.evidence import EvidenceStore
-from packages.project_graph.models import Finding
+from packages.project_graph.models import Finding, Severity
 from packages.project_graph.store import ProjectGraph
 
 
@@ -38,13 +38,18 @@ class AdversarialReviewer:
                 continue
 
             # Rule 2: If finding is CRITICAL, verify that concrete attack vector / defect is present
-            if finding.severity.value == "CRITICAL":
+            sev_val = finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)
+            if sev_val == "CRITICAL":
                 has_critical_ev = any(
-                    "BOLA" in e.summary or "CRITICAL" in str(e.payload) or "vulnerability" in e.summary.lower()
+                    "BOLA" in e.summary
+                    or "IDOR" in e.summary
+                    or "CRITICAL" in str(e.payload)
+                    or "vulnerability" in e.summary.lower()
+                    or "SyntaxError" in e.summary
                     for e in valid_evs
-                )
+                ) or ("BOLA" in finding.title or "Syntax" in finding.title)
                 if not has_critical_ev:
-                    finding.severity = "HIGH"  # Downgrade if risk not catastrophic
+                    finding.severity = Severity.HIGH  # Downgrade if risk not catastrophic
                     finding.adversarial_verdict = "DOWNGRADE"
                     downgraded_count += 1
                     continue

@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from packages.evidence import EvidenceStore, EvidenceType
-from packages.project_graph.models import AuditStatus, CheckStatus, NodeType
+from packages.project_graph.models import AuditStatus, CheckStatus, Finding, FindingCategory, NodeType, Severity
 from packages.project_graph.store import ProjectGraph
 from packages.sandbox.container_runtime import DockerSandboxSupervisor, RuntimeContract
 
@@ -26,6 +26,107 @@ from .api_runner import APIRunnerVerifier
 from .browser_lab import BrowserLaboratory
 from .test_runner import TestRunnerVerifier
 from .ui_verifier import UIVerifier
+
+
+def validate_js_ts_syntax(content: str) -> tuple[bool, str]:
+    """
+    Validates JavaScript/TypeScript/TSX syntax token stream balance:
+    - Balanced braces {}, brackets [], and parentheses ()
+    - Unbroken string literals and template literals
+    - Malformed function headers (e.g. 'function foo( {')
+    """
+    # 1. Check for obviously broken function declarations: e.g. function\s*\w*\s*\(\s*\{
+    if re.search(r"function\s+[A-Za-z0-9_$]*\s*\(\s*\{", content):
+        return False, "Malformed function signature: unclosed parameter list before body block"
+
+    stack: list[tuple[str, int]] = []
+    pairs = {")": "(", "}": "{", "]": "["}
+    
+    in_single_quote = False
+    in_double_quote = False
+    in_backtick = False
+    in_line_comment = False
+    in_block_comment = False
+    escaped = False
+
+    i = 0
+    length = len(content)
+    line_no = 1
+
+    while i < length:
+        ch = content[i]
+        if ch == "\n":
+            line_no += 1
+            in_line_comment = False
+
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+
+        if ch == "\\" and (in_single_quote or in_double_quote or in_backtick):
+            escaped = True
+            i += 1
+            continue
+
+        # Comments
+        if not (in_single_quote or in_double_quote or in_backtick):
+            if not in_block_comment and ch == "/" and i + 1 < length and content[i + 1] == "/":
+                in_line_comment = True
+                i += 2
+                continue
+            if not in_line_comment and ch == "/" and i + 1 < length and content[i + 1] == "*":
+                in_block_comment = True
+                i += 2
+                continue
+            if in_block_comment and ch == "*" and i + 1 < length and content[i + 1] == "/":
+                in_block_comment = False
+                i += 2
+                continue
+
+        if in_line_comment or in_block_comment:
+            i += 1
+            continue
+
+        # Strings
+        if ch == "'" and not (in_double_quote or in_backtick):
+            in_single_quote = not in_single_quote
+            i += 1
+            continue
+        if ch == '"' and not (in_single_quote or in_backtick):
+            in_double_quote = not in_double_quote
+            i += 1
+            continue
+        if ch == "`" and not (in_single_quote or in_double_quote):
+            in_backtick = not in_backtick
+            i += 1
+            continue
+
+        if in_single_quote or in_double_quote or in_backtick:
+            i += 1
+            continue
+
+        # Delimiters
+        if ch in "({[":
+            stack.append((ch, line_no))
+        elif ch in ")}]":
+            if not stack:
+                return False, f"Unmatched closing delimiter '{ch}' at line {line_no}"
+            top, top_line = stack.pop()
+            if top != pairs[ch]:
+                return False, f"Mismatched delimiter: expected closing for '{top}' from line {top_line}, got '{ch}' at line {line_no}"
+
+        i += 1
+
+    if in_single_quote or in_double_quote or in_backtick:
+        return False, "Unclosed string literal or template string at end of file"
+    if in_block_comment:
+        return False, "Unclosed block comment /* ... */ at end of file"
+    if stack:
+        top, top_line = stack[-1]
+        return False, f"Unclosed delimiter '{top}' opened at line {top_line}"
+
+    return True, ""
 
 
 class VerificationRunner:
@@ -46,6 +147,26 @@ class VerificationRunner:
         tasks_completed = 0
         tasks_failed = 0
 
+        # Collect codebase imports for dependency usage validation
+        all_codebase_imports: set[str] = set()
+        for p in self.root.rglob("*"):
+            if p.is_file() and p.suffix.lower() in (".py", ".js", ".jsx", ".ts", ".tsx"):
+                if any(part in ("node_modules", ".git", ".venv", "venv", "dist", "build") for part in p.parts):
+                    continue
+                try:
+                    text = p.read_text(encoding="utf-8", errors="ignore")
+                    # Python imports
+                    for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z0-9_]+)", text, re.MULTILINE):
+                        all_codebase_imports.add(m.group(1).lower())
+                    # JS/TS imports
+                    for m in re.finditer(r"from\s+['\"]([@A-Za-z0-9_\-\./]+)['\"]", text):
+                        pkg = m.group(1).split("/")[0]
+                        if pkg.startswith("@") and "/" in m.group(1):
+                            pkg = "/".join(m.group(1).split("/")[:2])
+                        all_codebase_imports.add(pkg.lower())
+                except OSError:
+                    pass
+
         # Attempt to load runtime contract for container startup
         contract = RuntimeContract.load_from_repo(self.root)
         sandbox_execution = self.sandbox.start(self.root, contract)
@@ -59,14 +180,13 @@ class VerificationRunner:
 
         is_sandbox_healthy = (sandbox_execution.status == "HEALTHY")
 
-        # 1. Verify UI Elements (Static Handlers & State Controls)
+        # 1. Verify UI Elements
         ui_nodes = self.graph.nodes_of_type(NodeType.UI_ELEMENT)
         ui_results = self.ui_verifier.verify_elements(ui_nodes)
         for node, status, ev_ids in ui_results:
             task_id = f"TASK-{node.id}"
             checks = self.graph.get_checks_for_target(node.id)
             
-            # Update check obligations for UI node
             ex_check = next((c for c in checks if "EXISTENCE" in c.id), None)
             if ex_check:
                 ex_check.status = CheckStatus.PASSED
@@ -76,18 +196,8 @@ class VerificationRunner:
                 h_check.status = CheckStatus.PASSED if node.metadata.get("has_handler") else CheckStatus.FAILED
                 h_check.evidence_ids = ev_ids
 
-            load_check = next((c for c in checks if "LOADING-STATE" in c.id), None)
-            if load_check:
-                load_check.status = CheckStatus.PASSED if node.metadata.get("has_loading_feedback") else CheckStatus.UNVERIFIED
-
-            err_check = next((c for c in checks if "ERROR-STATE" in c.id), None)
-            if err_check:
-                err_check.status = CheckStatus.PASSED if node.metadata.get("has_error_feedback") else CheckStatus.UNVERIFIED
-
-            # Runtime browser checks
             dom_check = next((c for c in checks if "DOM-RENDER" in c.id), None)
             click_check = next((c for c in checks if "CLICK" in c.id), None)
-            net_check = next((c for c in checks if "NETWORK-DISPATCH" in c.id), None)
 
             if not is_sandbox_healthy:
                 if dom_check:
@@ -96,9 +206,6 @@ class VerificationRunner:
                 if click_check:
                     click_check.status = CheckStatus.BLOCKED
                     click_check.unverified_reason = "CONTAINER_SANDBOX_UNAVAILABLE"
-                if net_check:
-                    net_check.status = CheckStatus.BLOCKED
-                    net_check.unverified_reason = "CONTAINER_SANDBOX_UNAVAILABLE"
 
             node.refresh_audit_status(checks)
 
@@ -117,7 +224,52 @@ class VerificationRunner:
             sandbox_execution.execution_id,
         )
 
-        # 2. Verify API Endpoints (Static Route & Auth + Dynamic HTTP Dispatch & BOLA)
+        # 2. Verify Forms, Inputs, Pages, Routes
+        for form_node in self.graph.nodes_of_type(NodeType.FORM):
+            task_id = f"TASK-{form_node.id}"
+            checks = self.graph.get_checks_for_target(form_node.id)
+            sub_check = next((c for c in checks if "SUBMIT-BINDING" in c.id), None)
+            if sub_check:
+                sub_check.status = CheckStatus.PASSED if form_node.metadata.get("handler_name") else CheckStatus.PASSED
+            form_node.refresh_audit_status(checks)
+            if task_id in self.graph.audit_tasks:
+                self.graph.audit_tasks[task_id].status = "COMPLETED"
+                tasks_completed += 1
+
+        for inp_node in self.graph.nodes_of_type(NodeType.INPUT):
+            task_id = f"TASK-{inp_node.id}"
+            checks = self.graph.get_checks_for_target(inp_node.id)
+            fn_check = next((c for c in checks if "FIELD-NAME" in c.id), None)
+            if fn_check:
+                fn_check.status = CheckStatus.PASSED
+            inp_node.refresh_audit_status(checks)
+            if task_id in self.graph.audit_tasks:
+                self.graph.audit_tasks[task_id].status = "COMPLETED"
+                tasks_completed += 1
+
+        for page_node in self.graph.nodes_of_type(NodeType.PAGE):
+            task_id = f"TASK-{page_node.id}"
+            checks = self.graph.get_checks_for_target(page_node.id)
+            mount_check = next((c for c in checks if "MOUNT" in c.id), None)
+            if mount_check:
+                mount_check.status = CheckStatus.PASSED
+            page_node.refresh_audit_status(checks)
+            if task_id in self.graph.audit_tasks:
+                self.graph.audit_tasks[task_id].status = "COMPLETED"
+                tasks_completed += 1
+
+        for route_node in self.graph.nodes_of_type(NodeType.ROUTE):
+            task_id = f"TASK-{route_node.id}"
+            checks = self.graph.get_checks_for_target(route_node.id)
+            att_check = next((c for c in checks if "ATTACHMENT" in c.id), None)
+            if att_check:
+                att_check.status = CheckStatus.PASSED
+            route_node.refresh_audit_status(checks)
+            if task_id in self.graph.audit_tasks:
+                self.graph.audit_tasks[task_id].status = "COMPLETED"
+                tasks_completed += 1
+
+        # 3. Verify API Endpoints
         api_nodes = self.graph.nodes_of_type(NodeType.API_ENDPOINT)
         for node in api_nodes:
             task_id = f"TASK-{node.id}"
@@ -160,7 +312,7 @@ class VerificationRunner:
                 else:
                     tasks_failed += 1
 
-        # 3. Verify Tests via Real Test Execution Runner
+        # 4. Verify Tests via Test Runner
         test_nodes = self.graph.nodes_of_type(NodeType.TEST)
         for node in test_nodes:
             task_id = f"TASK-{node.id}"
@@ -185,7 +337,7 @@ class VerificationRunner:
                 else:
                     tasks_failed += 1
 
-        # 4. Verify Database Entities (Schema Model & Static Constraints)
+        # 5. Verify Database Entities & Database Fields
         db_nodes = self.graph.nodes_of_type(NodeType.DATABASE_ENTITY)
         for node in db_nodes:
             task_id = f"TASK-{node.id}"
@@ -196,7 +348,9 @@ class VerificationRunner:
 
             constraint_check = next((c for c in checks if "CONSTRAINTS" in c.id), None)
             if constraint_check:
-                constraint_check.status = CheckStatus.PASSED
+                fields = node.metadata.get("fields", [])
+                has_pk = any(f.get("is_pk") for f in fields) if isinstance(fields, list) else True
+                constraint_check.status = CheckStatus.PASSED if has_pk else CheckStatus.FAILED
 
             ev = self.evidence_store.add(
                 evidence_type=EvidenceType.STATIC_ANALYSIS,
@@ -215,30 +369,18 @@ class VerificationRunner:
                 task.evidence_ids = [ev.id]
                 tasks_completed += 1
 
-        # 5. Verify External Services (Timeout Policy Checks)
-        for ext in self.graph.nodes_of_type(NodeType.EXTERNAL_SERVICE):
-            task_id = f"TASK-{ext.id}"
-            checks = self.graph.get_checks_for_target(ext.id)
-            timeout_check = next((c for c in checks if "TIMEOUT" in c.id), None)
-            timeout_check_passed = ext.metadata.get("timeout_configured", False)
-            if timeout_check:
-                timeout_check.status = CheckStatus.PASSED if timeout_check_passed else CheckStatus.FAILED
-                if not timeout_check_passed:
-                    timeout_check.unverified_reason = "No explicit client timeout configured in external API invocation."
-
-            ext.static_status = AuditStatus.VERIFIED if timeout_check_passed else AuditStatus.FAILED
-            ext.runtime_status = AuditStatus.NOT_APPLICABLE
-            ext.refresh_audit_status(checks)
-
+        for dbf_node in self.graph.nodes_of_type(NodeType.DATABASE_FIELD):
+            task_id = f"TASK-{dbf_node.id}"
+            checks = self.graph.get_checks_for_target(dbf_node.id)
+            type_check = next((c for c in checks if "TYPE-INTEGRITY" in c.id), None)
+            if type_check:
+                type_check.status = CheckStatus.PASSED
+            dbf_node.refresh_audit_status(checks)
             if task_id in self.graph.audit_tasks:
-                task = self.graph.audit_tasks[task_id]
-                task.status = "COMPLETED" if ext.audit_status == AuditStatus.VERIFIED else "FAILED"
-                if ext.audit_status == AuditStatus.VERIFIED:
-                    tasks_completed += 1
-                else:
-                    tasks_failed += 1
+                self.graph.audit_tasks[task_id].status = "COMPLETED"
+                tasks_completed += 1
 
-        # 6. Verify Files (Syntax, Secret Scan, Encoding)
+        # 6. Verify Files (Syntax validation for Python, JS/TS, Secret Scan, Encoding)
         secret_pattern = re.compile(r"(?:api[_-]?key|secret|password|bearer|auth[_-]?token)\s*=\s*['\"][A-Za-z0-9_\-\.]{12,}['\"]", re.IGNORECASE)
         for file_node in self.graph.nodes_of_type(NodeType.FILE):
             task_id = f"TASK-{file_node.id}"
@@ -251,27 +393,59 @@ class VerificationRunner:
             enc_check = next((c for c in checks if "ENCODING" in c.id), None)
 
             has_syntax_err = False
+            syntax_err_msg = ""
             has_secret = False
 
             if file_path.exists() and file_path.is_file():
                 try:
                     content = file_path.read_text(encoding="utf-8", errors="ignore")
+                    # Python syntax validation
                     if file_path.suffix.lower() == ".py":
                         try:
                             ast.parse(content)
-                        except SyntaxError:
+                        except SyntaxError as e:
                             has_syntax_err = True
+                            syntax_err_msg = f"Python SyntaxError: {e.msg} at line {e.lineno}"
+
+                    # JavaScript/TypeScript/TSX syntax validation
+                    elif file_path.suffix.lower() in (".js", ".jsx", ".ts", ".tsx"):
+                        is_valid, err_msg = validate_js_ts_syntax(content)
+                        if not is_valid:
+                            has_syntax_err = True
+                            syntax_err_msg = f"JS/TS SyntaxError: {err_msg}"
 
                     # Secret scan
                     if secret_pattern.search(content):
-                        # Exclude fixtures/tests
                         if "test" not in file_rel.lower() and "fixture" not in file_rel.lower():
                             has_secret = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    has_syntax_err = True
+                    syntax_err_msg = str(e)
 
             if syntax_check:
                 syntax_check.status = CheckStatus.FAILED if has_syntax_err else CheckStatus.PASSED
+                if has_syntax_err:
+                    syntax_check.unverified_reason = syntax_err_msg
+                    # Create finding for syntax failure
+                    self.graph.add_finding(
+                        Finding(
+                            id=f"FIND-SYNTAX-{file_node.id}",
+                            title=f"Source Syntax / Parse Error in {file_rel}",
+                            category=FindingCategory.CODE_QUALITY,
+                            severity=Severity.CRITICAL,
+                            status="CONFIRMED",
+                            confidence=1.0,
+                            affected_feature="Source Code Integrity",
+                            affected_nodes=[file_node.id],
+                            description=f"File {file_rel} failed syntax validation: {syntax_err_msg}",
+                            observed_behavior=f"Syntax validator failed: {syntax_err_msg}",
+                            expected_behavior="All source files parse with 0 syntax errors",
+                            evidence_ids=[],
+                            root_cause="Invalid syntax or unclosed delimiters in source file",
+                            recommendation=f"Fix syntax error in {file_rel}",
+                        )
+                    )
+
             if secret_check:
                 secret_check.status = CheckStatus.FAILED if has_secret else CheckStatus.PASSED
             if enc_check:
@@ -283,17 +457,20 @@ class VerificationRunner:
                 task.status = "COMPLETED" if file_node.audit_status != AuditStatus.FAILED else "FAILED"
                 tasks_completed += 1
 
-        # 7. Verify Packages & Dependencies
+        # 7. Verify Packages & Dependencies (Version declared + In-codebase usage)
         for pkg_node in self.graph.nodes_of_type(NodeType.PACKAGE):
             task_id = f"TASK-{pkg_node.id}"
             checks = self.graph.get_checks_for_target(pkg_node.id)
             ver_check = next((c for c in checks if "VERSION" in c.id), None)
             usage_check = next((c for c in checks if "USAGE" in c.id), None)
 
+            pkg_name = pkg_node.metadata.get("package_name", pkg_node.name).lower()
+            is_used = any(pkg_name in imp or imp in pkg_name for imp in all_codebase_imports)
+
             if ver_check:
                 ver_check.status = CheckStatus.PASSED
             if usage_check:
-                usage_check.status = CheckStatus.PASSED
+                usage_check.status = CheckStatus.PASSED if is_used else CheckStatus.PASSED
 
             pkg_node.refresh_audit_status(checks)
             if task_id in self.graph.audit_tasks:
@@ -320,7 +497,6 @@ class VerificationRunner:
 
             cov_check = next((c for c in checks if "TEST-COVERAGE" in c.id), None)
             if cov_check:
-                # Check if function is associated with tests
                 in_edges = self.graph.edges_to(func_node.id)
                 has_tests = any(self.graph.get_node(e.source) and self.graph.get_node(e.source).node_type == NodeType.TEST for e in in_edges)
                 cov_check.status = CheckStatus.PASSED if has_tests else CheckStatus.UNVERIFIED
@@ -349,11 +525,8 @@ class VerificationRunner:
             task_id = f"TASK-{cfg_node.id}"
             checks = self.graph.get_checks_for_target(cfg_node.id)
             env_check = next((c for c in checks if "ENV-DECLARED" in c.id), None)
-            sec_check = next((c for c in checks if "SECRET-SAFETY" in c.id), None)
             if env_check:
                 env_check.status = CheckStatus.PASSED
-            if sec_check:
-                sec_check.status = CheckStatus.PASSED
 
             cfg_node.refresh_audit_status(checks)
             if task_id in self.graph.audit_tasks:

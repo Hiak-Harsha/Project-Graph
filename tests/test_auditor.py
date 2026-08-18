@@ -84,9 +84,9 @@ class TestAuditorPlatform(unittest.TestCase):
         """Verify UI discovery finds actionable elements and checks handlers."""
         graph = ProjectGraph()
         ui_elements = discover_ui_elements(FIXTURE_PATH, graph)
-
-        self.assertEqual(len(ui_elements), 3)
-        dead_button = next((u for u in ui_elements if "Export Resume" in u.name), None)
+        actionable = [u for u in ui_elements if u.node_type == NodeType.UI_ELEMENT]
+        self.assertEqual(len(actionable), 3)
+        dead_button = next((u for u in actionable if "Export Resume" in u.name), None)
         self.assertIsNotNone(dead_button)
         self.assertFalse(dead_button.metadata.get("has_handler"))
 

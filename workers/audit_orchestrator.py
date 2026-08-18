@@ -31,6 +31,7 @@ from packages.discovery import (
     discover_code_entities,
     discover_configs_and_services,
     discover_database_entities,
+    discover_dependencies,
     discover_features_and_requirements,
     discover_files,
     discover_tests,
@@ -75,6 +76,7 @@ def run_full_audit(repo_path: str | Path) -> tuple[ProjectGraph, EvidenceStore, 
 
     # 2. Discovery Phase
     discover_files(repo_path, graph)
+    discover_dependencies(repo_path, graph)
     discover_code_entities(repo_path, graph)
     discover_api_endpoints(repo_path, graph)
     discover_ui_elements(repo_path, graph)
