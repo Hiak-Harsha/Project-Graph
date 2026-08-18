@@ -89,20 +89,27 @@ class RuntimePlanner:
                 return None, f"Failed to instantiate contract from candidate: {e}"
 
         # 3. Boot container sandbox supervisor
-        sandbox_exec: SandboxExecution = self.supervisor.start_repository_sandbox(self.root, contract)
+        sandbox_exec: SandboxExecution = self.supervisor.start(self.root, contract)
         if sandbox_exec.status != "HEALTHY":
-            return None, f"Sandbox container boot failed health check: {sandbox_exec.error_message or sandbox_exec.status}"
+            return None, f"Sandbox container boot failed health check: {sandbox_exec.reason or sandbox_exec.status}"
 
         # 4. Construct verified ExecutionTarget
+        host_port = contract.internal_port
+        if sandbox_exec.base_url and ":" in sandbox_exec.base_url:
+            try:
+                host_port = int(sandbox_exec.base_url.split(":")[-1])
+            except ValueError:
+                pass
+
         target = ExecutionTarget(
             execution_id=sandbox_exec.execution_id,
-            container_id=sandbox_exec.container_id,
-            base_url=sandbox_exec.base_url,
+            container_id=sandbox_exec.container_name or "",
+            base_url=sandbox_exec.base_url or "",
             health_status=sandbox_exec.status,
             environment_id="DOCKER_SANDBOX_ISOLATED",
-            container_image="project-graph/audit-sandbox:latest",
-            internal_port=sandbox_exec.internal_port,
-            host_port=sandbox_exec.host_port,
+            container_image=sandbox_exec.image_tag or "project-graph/audit-sandbox:latest",
+            internal_port=contract.internal_port,
+            host_port=host_port,
             is_healthy=True,
             logs_uri=f"memory://sandbox-logs/{sandbox_exec.execution_id}",
         )

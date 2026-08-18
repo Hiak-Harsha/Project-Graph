@@ -61,15 +61,15 @@ class RuntimeBootstrapEngine:
         db_type = None
 
         # 1. Python Inspection (FastAPI / Flask / Django)
-        req_txt = self.root / "requirements.txt"
-        pyproject = self.root / "pyproject.toml"
+        req_files = list(self.root.rglob("requirements*.txt"))
+        pyproject_files = list(self.root.rglob("pyproject.toml"))
 
-        if req_txt.exists() or pyproject.exists():
+        if req_files or pyproject_files:
             content = ""
-            if req_txt.exists():
-                content += req_txt.read_text(encoding="utf-8", errors="ignore")
-            if pyproject.exists():
-                content += pyproject.read_text(encoding="utf-8", errors="ignore")
+            for rf in req_files:
+                content += rf.read_text(encoding="utf-8", errors="ignore") + "\n"
+            for pf in pyproject_files:
+                content += pf.read_text(encoding="utf-8", errors="ignore") + "\n"
 
             content_lower = content.lower()
             if "fastapi" in content_lower:
@@ -101,8 +101,10 @@ class RuntimeBootstrapEngine:
                 db_type = "PostgreSQL"
 
         # 2. Node.js Inspection (Express / Next.js / React)
-        pkg_json = self.root / "package.json"
-        if pkg_json.exists():
+        pkg_files = list(self.root.rglob("package.json"))
+        for pkg_json in pkg_files:
+            if "node_modules" in str(pkg_json):
+                continue
             try:
                 data = json.loads(pkg_json.read_text(encoding="utf-8"))
                 deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}

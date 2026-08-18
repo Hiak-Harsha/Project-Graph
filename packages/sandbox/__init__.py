@@ -1,8 +1,11 @@
-"""
-Sandbox and Execution Environment subsystem for isolated, safe process management.
-"""
+from .adapters import (
+    ContainerTestResult,
+    ContainerTestRunnerAdapter,
+    HTTPResponsePayload,
+    HTTPRuntimeAdapter,
+)
 from .bootstrap_engine import RuntimeBootstrapEngine, RuntimeContractCandidate
-from .container_runtime import DockerSandboxSupervisor, RuntimeContract, SandboxExecution
+from .container_runtime import CommandResult, DockerSandboxSupervisor, RuntimeContract, SandboxExecution
 from .environment import EnvironmentCapabilities, detect_environment_capabilities
 from .execution_target import ExecutionTarget, RuntimePlanner, RuntimePolicy
 from .process_manager import ManagedProcess, ProcessManager
@@ -12,6 +15,7 @@ __all__ = [
     "detect_environment_capabilities",
     "ProcessManager",
     "ManagedProcess",
+    "CommandResult",
     "DockerSandboxSupervisor",
     "RuntimeContract",
     "SandboxExecution",
@@ -20,4 +24,8 @@ __all__ = [
     "ExecutionTarget",
     "RuntimePlanner",
     "RuntimePolicy",
+    "HTTPRuntimeAdapter",
+    "ContainerTestRunnerAdapter",
+    "HTTPResponsePayload",
+    "ContainerTestResult",
 ]
